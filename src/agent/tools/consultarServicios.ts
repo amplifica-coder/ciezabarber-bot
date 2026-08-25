@@ -9,7 +9,7 @@ const inputSchema = z.object({
 export const consultarServiciosTool: AgentTool<z.infer<typeof inputSchema>> = {
   name: "consultar_servicios",
   description:
-    "Devuelve el catálogo de servicios activos de Raabta con su nombre, duración, precio y adelanto requerido. " +
+    "Devuelve el catálogo de servicios activos de Cieza Barber con su nombre, duración, precio y adelanto requerido. " +
     "Usa el parámetro grupo para filtrar por Principales, Complementarios u Opcionales; omítelo para ver todo.",
   inputSchema,
   jsonSchema: {

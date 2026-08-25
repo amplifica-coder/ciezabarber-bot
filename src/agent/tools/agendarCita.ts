@@ -22,7 +22,7 @@ export const agendarCitaTool: AgentTool<z.infer<typeof inputSchema>> = {
   description:
     "Agenda una cita. fecha y hora deben ser exactamente un valor que devolvió consultar_disponibilidad para ese " +
     "servicio — nunca inventes ni calcules un horario. nombre_cliente es opcional: solo pídelo si no lo tienes " +
-    "ya del contexto de la conversación. correo_cliente es opcional: si la clienta lo da (por ejemplo porque " +
+    "ya del contexto de la conversación. correo_cliente es opcional: si el cliente lo da (por ejemplo porque " +
     "quiere la invitación en su Google Calendar), pásalo aquí; nunca lo pidas como requisito para agendar.",
   inputSchema,
   jsonSchema: {
@@ -32,7 +32,7 @@ export const agendarCitaTool: AgentTool<z.infer<typeof inputSchema>> = {
       fecha: { type: "string", description: "YYYY-MM-DD, debe venir de consultar_disponibilidad" },
       hora: { type: "string", description: "HH:mm hora de Lima, debe venir de consultar_disponibilidad" },
       nombre_cliente: { type: "string", description: "Solo si no está ya disponible del contexto" },
-      correo_cliente: { type: "string", description: "Opcional, solo si la clienta lo ofrece voluntariamente" },
+      correo_cliente: { type: "string", description: "Opcional, solo si el cliente lo ofrece voluntariamente" },
     },
     required: ["servicio_id", "fecha", "hora"],
   },

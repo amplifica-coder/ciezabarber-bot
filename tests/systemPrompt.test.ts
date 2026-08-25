@@ -95,10 +95,10 @@ describe("buildSystemPrompt", () => {
 
   it("incluye horario, dirección y política de cancelación reales", async () => {
     const prompt = await buildSystemPrompt();
-    expect(prompt).toContain("8:00am–12:00pm");
-    expect(prompt).toContain("Domingo cerrado");
+    expect(prompt).toContain("10:00am–9:00pm");
+    expect(prompt).toContain("Todos los días");
     expect(prompt).toContain("30 minutos de antelación");
-    expect(prompt).toContain("Av. José Santos Chocano 1330");
+    expect(prompt).toContain("Jr. Manuel Gonzales Prada 875");
   });
 
   it("incluye la regla dura de no inventar disponibilidad/precios", async () => {

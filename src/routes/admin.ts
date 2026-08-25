@@ -42,7 +42,7 @@ export async function adminRoutes(app: FastifyInstance) {
    * Respuesta escrita por un humano del staff desde el panel.
    *
    * El envío va antes de guardar a propósito: si WhatsApp rechaza el
-   * mensaje, no queremos dejar en el historial algo que la clienta nunca
+   * mensaje, no queremos dejar en el historial algo que el cliente nunca
    * recibió (y que Claude luego leería como contexto real).
    */
   app.post("/admin/mensajes", async (request: FastifyRequest, reply: FastifyReply) => {
@@ -64,7 +64,7 @@ export async function adminRoutes(app: FastifyInstance) {
       return reply.status(409).send({
         error: "ventana_cerrada",
         mensaje:
-          "Pasaron más de 24 horas desde el último mensaje de la clienta. WhatsApp solo permite retomar el contacto con una plantilla aprobada.",
+          "Pasaron más de 24 horas desde el último mensaje de el cliente. WhatsApp solo permite retomar el contacto con una plantilla aprobada.",
       });
     }
 
@@ -95,7 +95,7 @@ export async function adminRoutes(app: FastifyInstance) {
    * Envío masivo de una plantilla (promociones). Siempre por plantilla
    * aprobada: una campaña sale casi siempre fuera de la ventana de 24h, y
    * mezclar los dos caminos haría que el resultado dependa de cuándo
-   * escribió cada clienta por última vez.
+   * escribió cada cliente por última vez.
    */
   app.post("/admin/promociones", async (request: FastifyRequest, reply: FastifyReply) => {
     await requireStaff(request.headers.authorization);

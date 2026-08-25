@@ -58,7 +58,7 @@ export async function isWindowOpenFor(telefono: string): Promise<boolean> {
  * Igual que sendTextIfWindowOpen pero para media, y devuelve si se llegó a
  * enviar — el tool del agente necesita saberlo para poder avisarle a
  * Claude que no se pudo mandar en vez de fingir que sí (y que Claude no le
- * diga a la clienta "te mandé la foto" cuando en realidad no salió nada).
+ * diga a el cliente "te mandé la foto" cuando en realidad no salió nada).
  */
 export async function sendMediaIfWindowOpen(params: {
   telefono: string;

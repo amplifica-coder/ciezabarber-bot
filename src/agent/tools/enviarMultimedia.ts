@@ -12,7 +12,7 @@ export const enviarMultimediaTool: AgentTool<z.infer<typeof inputSchema>> = {
   name: "enviar_multimedia",
   description:
     "Envía una imagen, video o audio de la biblioteca de la empresa (ver MULTIMEDIA DISPONIBLE en tus " +
-    "instrucciones) directo por WhatsApp a la clienta. Usa el id exacto de esa lista. El archivo se manda como " +
+    "instrucciones) directo por WhatsApp a el cliente. Usa el id exacto de esa lista. El archivo se manda como " +
     "un mensaje aparte — después de llamar a esta tool, puedes agregar un texto corto si aporta algo, pero no " +
     "es obligatorio, el caption del archivo ya suele bastar.",
   inputSchema,

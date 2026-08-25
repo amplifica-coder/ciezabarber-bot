@@ -22,11 +22,11 @@ const SIN_CITA_PENDIENTE =
 
 function textoConfirmado(montoDetectado: number | null): string {
   const monto = montoDetectado != null ? ` de S/ ${montoDetectado}` : "";
-  return `¡Recibido! Confirmé tu comprobante${monto} y tu cita ya quedó pagada ✅ Nos vemos pronto 💕`;
+  return `¡Recibido! Confirmé tu comprobante${monto} y tu cita ya quedó pagada ✅ Nos vemos pronto 💈`;
 }
 
 const TEXTO_EN_REVISION =
-  "Recibí tu comprobante 🙏 No pude confirmarlo automáticamente, así que lo va a revisar un asesor de Raabta " +
+  "Recibí tu comprobante 🙏 No pude confirmarlo automáticamente, así que lo va a revisar un asesor de Cieza Barber " +
   "en breve. Te avisamos apenas quede confirmado.";
 
 /**

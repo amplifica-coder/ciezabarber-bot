@@ -1,7 +1,9 @@
-# raabta-bot
+# ciezabarber-bot
 
-Agente conversacional de WhatsApp para Raabta Beauty Academy: agenda, consulta,
+Agente conversacional de WhatsApp para Cieza Barber Studio: agenda, consulta,
 reagenda y cancela citas de forma autónoma vía WhatsApp Cloud API + Claude.
+
+Clonado desde el bot de Raabta Beauty Academy (mismo motor, otro negocio).
 
 ## Estado
 
@@ -193,7 +195,7 @@ Para que los recordatorios funcionen siempre, crear en **WhatsApp Manager →
 Plantillas de mensajes** una plantilla de categoría *Utility* llamada como
 diga `WHATSAPP_TEMPLATE_RECORDATORIO`, con tres variables en el cuerpo:
 
-> Hola {{1}} 💕 Te recordamos tu cita de {{2}} el {{3}} en Raabta Studio.
+> Hola {{1}} 💈 Te recordamos tu cita de {{2}} el {{3}} en Cieza Barber Studio.
 > Si necesitas reagendar o cancelar, respóndenos por acá.
 
 Las promociones usan plantillas de categoría *Marketing* (se cobran por

@@ -17,10 +17,10 @@ const MAX_TOKENS = 1024;
 const BUDGET_NOTICE_THROTTLE_MS = 60 * 60_000;
 
 export const FALLBACK_MESSAGE =
-  "Disculpa, tuve un problema para procesar tu mensaje. Ya avisé a un asesor de Raabta para que te escriba.";
+  "Disculpa, tuve un problema para procesar tu mensaje. Ya avisé a un asesor de Cieza Barber para que te escriba.";
 
 const BUDGET_EXCEEDED_MESSAGE =
-  "Estamos con alta demanda en este momento. Un asesor de Raabta te va a escribir en breve para ayudarte.";
+  "Estamos con alta demanda en este momento. Un asesor de Cieza Barber te va a escribir en breve para ayudarte.";
 
 let lastBudgetNoticeAt = 0;
 

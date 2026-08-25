@@ -29,7 +29,7 @@ export function formatearFechaCita(inicioUtc: string): string {
 }
 
 function textoRecordatorio(nombre: string, servicio: string, cuando: string): string {
-  return `Hola ${nombre} 💕 Te recordamos tu cita de ${servicio} el ${cuando} en Raabta Studio. Si necesitas reagendar o cancelar, respóndenos por acá.`;
+  return `Hola ${nombre} 💈 Te recordamos tu cita de ${servicio} el ${cuando} en Cieza Barber Studio. Si necesitas reagendar o cancelar, respóndenos por acá.`;
 }
 
 /**
