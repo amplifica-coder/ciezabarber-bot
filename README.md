@@ -219,8 +219,9 @@ que se salta automáticamente si falta `SUPABASE_SERVICE_ROLE_KEY`.
    "Crear app" → tipo "Business" → agregar el producto **WhatsApp**.
 2. **Registrar el número**: en el panel de WhatsApp de la app, agregar el
    número de teléfono dedicado al bot (requiere verificarlo por SMS/llamada).
-   Este es el número que reemplaza a `51904719939` en los 6 enlaces
-   `wa.me/...` de `web/` una vez que exista.
+   Este debe ser el número `51914851374` que ya está en los 6 enlaces
+   `wa.me/...` de `web/` — o, si se decide usar un número dedicado al bot
+   distinto al de atención humana, ese número nuevo reemplazándolo ahí.
 3. **Token permanente vía System User** (no el token temporal de prueba,
    que expira en 24h): en el Business Manager → Configuración del negocio
    → Usuarios del sistema → crear uno con rol Admin, asignarle la app de
