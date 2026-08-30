@@ -8,7 +8,7 @@ import { getServiceById } from "../db/repositories/services.js";
 import { findOrCreateByPhone } from "../db/repositories/clientes.js";
 import { crearCitasConsecutivas } from "../db/repositories/citas.js";
 import { timeStringToUtcDate } from "../lib/availability.js";
-import { BUSINESS_TIMEZONE } from "../config/business.js";
+import { BUSINESS_TIMEZONE, BARBEROS } from "../config/business.js";
 
 const FECHA_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const HORA_REGEX = /^\d{2}:\d{2}$/;
@@ -27,6 +27,7 @@ const reservaBodySchema = z.object({
   telefono: z.string().trim().min(6),
   primera_visita: z.boolean().nullable().optional(),
   comentario: z.string().trim().max(1000).optional(),
+  barbero: z.enum(BARBEROS).optional(),
 });
 
 /**
@@ -91,6 +92,7 @@ export async function publicRoutes(app: FastifyInstance) {
       inicioUtc,
       creadaPor: "humano",
       ...(notas ? { notas } : {}),
+      ...(body.barbero ? { barbero: body.barbero } : {}),
     });
 
     if (!resultado.ok) {

@@ -20,6 +20,7 @@ export type Cita = {
   google_event_id: string | null;
   creada_por: "bot" | "humano";
   notas: string | null;
+  barbero: string | null;
   comprobante_estado: ComprobanteEstado;
   created_at: string;
   updated_at: string;
@@ -42,6 +43,7 @@ export async function crearCita(params: {
   finUtc: Date;
   creadaPor?: "bot" | "humano";
   notas?: string;
+  barbero?: string;
 }): Promise<CrearCitaResult> {
   const desdeRango = new Date(params.inicioUtc.getTime() - 24 * 60 * 60_000);
   const hastaRango = new Date(params.finUtc.getTime() + 24 * 60 * 60_000);
@@ -76,6 +78,7 @@ export async function crearCita(params: {
       fin_utc: params.finUtc.toISOString(),
       creada_por: params.creadaPor ?? "bot",
       notas: params.notas ?? null,
+      barbero: params.barbero ?? null,
     })
     .select("*")
     .single();
@@ -198,6 +201,7 @@ export async function crearCitasConsecutivas(params: {
   inicioUtc: Date;
   creadaPor: "bot" | "humano";
   notas?: string;
+  barbero?: string;
 }): Promise<CrearCitasConsecutivasResult> {
   const citasCreadas: Cita[] = [];
   let cursor = params.inicioUtc;
@@ -217,6 +221,7 @@ export async function crearCitasConsecutivas(params: {
       finUtc,
       creadaPor: params.creadaPor,
       ...(params.notas ? { notas: params.notas } : {}),
+      ...(params.barbero ? { barbero: params.barbero } : {}),
     });
 
     if (!resultado.ok) {
