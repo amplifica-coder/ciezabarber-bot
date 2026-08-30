@@ -15,6 +15,7 @@ const inputSchema = z.object({
   hora: z.string().regex(HORA_REGEX, "Formato de hora debe ser HH:mm"),
   nombre_cliente: z.string().optional(),
   correo_cliente: z.string().email().optional(),
+  notas: z.string().max(500).optional(),
 });
 
 export const agendarCitaTool: AgentTool<z.infer<typeof inputSchema>> = {
@@ -23,7 +24,9 @@ export const agendarCitaTool: AgentTool<z.infer<typeof inputSchema>> = {
     "Agenda una cita. fecha y hora deben ser exactamente un valor que devolvió consultar_disponibilidad para ese " +
     "servicio — nunca inventes ni calcules un horario. nombre_cliente es opcional: solo pídelo si no lo tienes " +
     "ya del contexto de la conversación. correo_cliente es opcional: si el cliente lo da (por ejemplo porque " +
-    "quiere la invitación en su Google Calendar), pásalo aquí; nunca lo pidas como requisito para agendar.",
+    "quiere la invitación en su Google Calendar), pásalo aquí; nunca lo pidas como requisito para agendar. " +
+    "notas es opcional: cualquier dato para el staff que no encaje en los demás campos (barbero de preferencia, " +
+    "un pedido especial) — el cliente nunca ve este texto, es interno.",
   inputSchema,
   jsonSchema: {
     type: "object",
@@ -33,6 +36,7 @@ export const agendarCitaTool: AgentTool<z.infer<typeof inputSchema>> = {
       hora: { type: "string", description: "HH:mm hora de Lima, debe venir de consultar_disponibilidad" },
       nombre_cliente: { type: "string", description: "Solo si no está ya disponible del contexto" },
       correo_cliente: { type: "string", description: "Opcional, solo si el cliente lo ofrece voluntariamente" },
+      notas: { type: "string", description: "Nota interna para el staff, ej. barbero de preferencia. El cliente no la ve." },
     },
     required: ["servicio_id", "fecha", "hora"],
   },
@@ -56,6 +60,7 @@ export const agendarCitaTool: AgentTool<z.infer<typeof inputSchema>> = {
       inicioUtc,
       finUtc,
       creadaPor: "bot",
+      ...(input.notas ? { notas: input.notas } : {}),
     });
 
     if (!result.ok) {

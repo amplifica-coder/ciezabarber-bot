@@ -26,6 +26,16 @@ function formatearFechaHoy(): string {
 const HOURS_TEXT = "Todos los días, 10:00am–9:00pm.";
 const CANCELLATION_POLICY = "Se puede cancelar una cita con al menos 30 minutos de antelación.";
 
+// Igual que en el sitio web (web/assets/booking.js): cada barbero tiene un
+// día de descanso fijo. El bot no valida esto contra la disponibilidad real
+// (la tabla `citas` todavía no distingue por barbero) — es solo para que el
+// agente pueda avisar de buena fe y anotar la preferencia en `notas`.
+const BARBEROS = [
+  { nombre: "Cieza", descansa: "miércoles" },
+  { nombre: "Nilton", descansa: "martes" },
+  { nombre: "Bryan", descansa: "lunes" },
+];
+
 function formatCatalog(services: Service[]): string {
   const groups: Record<string, Service[]> = { Principales: [], Complementarios: [], Opcionales: [] };
   for (const s of services) groups[s.booking_group]?.push(s);
@@ -78,6 +88,15 @@ ${CANCELLATION_POLICY}
 
 CATÁLOGO DE SERVICIOS ACTIVOS
 ${catalog}
+
+BARBEROS
+${BARBEROS.map((b) => `  - ${b.nombre}: descansa los ${b.descansa}`).join("\n")}
+Si el cliente no menciona a nadie, no hace falta preguntar por defecto. Pero si pide un barbero en particular:
+- Avísale con naturalidad si ese día cae justo en el descanso de ese barbero, y ofrécele otro día o que lo
+  atienda otro barbero — este dato no sale de ninguna tool, así que dilo como algo que sabes de memoria, no como
+  un resultado verificado.
+- Sea cual sea el caso, pásaselo a agendar_cita en el parámetro notas (ej. "Barbero preferido: Nilton.") para que
+  quede registrado — si no lo haces, la preferencia se pierde y el staff no se entera.
 
 MULTIMEDIA DISPONIBLE (usa enviar_multimedia con el id exacto)
 ${multimedia}

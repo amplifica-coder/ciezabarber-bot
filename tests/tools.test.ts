@@ -78,6 +78,14 @@ describe("validación de input de tools (Zod)", () => {
     );
   });
 
+  it("agendar_cita acepta notas opcional para el staff (ej. barbero preferido)", () => {
+    const base = { servicio_id: "microblading", fecha: "2026-08-20", hora: "10:00" };
+    expect(agendarCitaTool.inputSchema.safeParse(base).success).toBe(true);
+    expect(
+      agendarCitaTool.inputSchema.safeParse({ ...base, notas: "Barbero preferido: Nilton." }).success,
+    ).toBe(true);
+  });
+
   it("cancelar_cita exige cita_id, motivo es opcional", () => {
     expect(cancelarCitaTool.inputSchema.safeParse({ cita_id: "abc" }).success).toBe(true);
     expect(cancelarCitaTool.inputSchema.safeParse({ cita_id: "abc", motivo: "no puedo ir" }).success).toBe(true);
