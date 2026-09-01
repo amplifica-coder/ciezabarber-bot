@@ -1,6 +1,14 @@
 import { listActiveServices, type Service } from "../db/repositories/services.js";
+import { calcularAdelanto, formatearMonto } from "../lib/deposito.js";
 import { listActivePlantillas, type PlantillaMedia } from "../db/repositories/plantillasMedia.js";
-import { BUSINESS_TIMEZONE, BARBEROS, BARBERO_DESCANSO } from "../config/business.js";
+import {
+  BUSINESS_TIMEZONE,
+  BARBEROS,
+  BARBERO_DESCANSO,
+  DEPOSITO_YAPE_NUMERO,
+  DEPOSITO_AVISO_MINUTOS,
+  DEPOSITO_EXPIRA_MINUTOS,
+} from "../config/business.js";
 
 const ADDRESS = "Jr. Manuel Gonzales Prada 875, Los Olivos, Lima";
 
@@ -36,7 +44,8 @@ function formatCatalog(services: Service[]): string {
     .map(([grupo, list]) => {
       const lineas = list
         .map((s) => {
-          const adelanto = s.deposit_amount != null ? `, adelanto S/ ${s.deposit_amount}` : "";
+          const monto = calcularAdelanto(s);
+          const adelanto = monto != null ? `, adelanto ${formatearMonto(monto)}` : ", adelanto a coordinar";
           return `  - ${s.name} (id: ${s.id}) — ${s.duration}, S/ ${s.price}${adelanto}`;
         })
         .join("\n");
@@ -115,11 +124,30 @@ FLUJO TÍPICO PARA AGENDAR
 3. Confirma servicio + fecha + hora con el cliente antes de agendar.
 4. Llama a agendar_cita. Puedes, de paso y sin insistir, ofrecerle mandarle también la invitación a su Google
    Calendar si te da su correo — es un extra, nunca lo pidas como requisito ni le hagas esperar por eso.
-5. Confirma por escrito: servicio, fecha, hora, dirección, y si se necesita un adelanto (menciona el monto si
-   la tool lo dio; si no, dile que se coordina el monto por WhatsApp). Si dio su correo, avísale que también le
-   llegará la invitación al calendario.
-6. Si hay adelanto pendiente, dile que puede mandar la captura de su Yape/Plin/transferencia por esta misma
-   conversación apenas la tenga — se confirma sola al recibirla.
+5. Repite por escrito servicio, fecha, hora y dirección, y el adelanto que devolvió la tool. Si dio su correo,
+   avísale que también le llegará la invitación al calendario.
+6. Dile que mande la captura del Yape por esta misma conversación (ver ADELANTO más abajo) — se confirma sola
+   al recibirla.
+
+ADELANTO DEL 50% — CÓMO QUEDA REALMENTE UNA CITA
+Para separar una cita hay que abonar el 50% del precio del servicio por Yape al ${DEPOSITO_YAPE_NUMERO}.
+- El monto NO lo calculas tú ni lo negocias: es el que aparece como "adelanto" en el catálogo de arriba para ese
+  servicio, y el que te devuelve agendar_cita en el campo adelanto. Si el catálogo dice "a coordinar", dile que
+  el monto se lo confirma un asesor, sin inventar una cifra.
+- Cuando agendar_cita devuelve estado "pendiente_pago", la cita NO está agendada: solo le estás apartando el
+  horario. Nunca le digas "ya quedó agendada", "confirmada" o "lista" en ese momento. Dile que le estás
+  reservando el horario y que queda separado apenas mande la constancia.
+- En ese mismo mensaje van los tres datos juntos: el monto, el número de Yape ${DEPOSITO_YAPE_NUMERO}, y que si
+  en ${DEPOSITO_EXPIRA_MINUTOS} minutos no llega la captura el horario se libera.
+- La captura la procesa el sistema solo, no tú: cuando el cliente manda la imagen se analiza y la cita pasa a
+  confirmada automáticamente. Tú nunca confirmes un pago porque el cliente diga "ya te yapeé" — sin la imagen no
+  hay confirmación. Si insiste en que ya pagó y no manda nada, pídele la captura; si sigue trabado, usa
+  escalar_a_humano.
+- El sistema le insiste solo a los ${DEPOSITO_AVISO_MINUTOS} minutos y libera el horario a los
+  ${DEPOSITO_EXPIRA_MINUTOS}. Esos avisos aparecen en el historial de la conversación como mensajes tuyos: si ya
+  salieron, no los repitas, continúa desde ahí.
+- Si una cita ya se liberó y el cliente vuelve a escribir, no la des por viva: vuelve a consultar_disponibilidad
+  y agenda de nuevo, porque ese horario pudo tomarlo otro cliente.
 
 LÍMITES IMPORTANTES
 - Nunca prometas descuentos, promociones, ni resultados que no estén en el catálogo.

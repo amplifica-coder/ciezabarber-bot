@@ -1,20 +1,13 @@
-import { supabase } from "../db/client.js";
 import { logger } from "../lib/logger.js";
 import { descargarMedia } from "../whatsapp/client.js";
 import { sendTextIfWindowOpen } from "../whatsapp/window.js";
 import { guardarMensaje } from "../db/repositories/mensajes.js";
 import { escalarConversacion } from "../db/repositories/conversaciones.js";
-import { getCitaPendienteDeComprobante, guardarComprobante } from "../db/repositories/citas.js";
-import { analizarComprobante } from "./paymentProof.js";
+import { getReservaPendienteDeComprobante } from "../db/repositories/citas.js";
+import { procesarComprobante } from "../lib/comprobanteService.js";
 import type { InboundMessage } from "../whatsapp/parser.js";
 import type { Cliente } from "../db/repositories/clientes.js";
 import type { Conversacion } from "../db/repositories/conversaciones.js";
-
-const EXTENSION_POR_MIME: Record<string, string> = {
-  "image/jpeg": "jpg",
-  "image/png": "png",
-  "image/webp": "webp",
-};
 
 const SIN_CITA_PENDIENTE =
   "Gracias por la imagen 🙏 Ahorita no tengo ninguna cita tuya esperando comprobante de pago. " +
@@ -22,19 +15,20 @@ const SIN_CITA_PENDIENTE =
 
 function textoConfirmado(montoDetectado: number | null): string {
   const monto = montoDetectado != null ? ` de S/ ${montoDetectado}` : "";
-  return `¡Recibido! Confirmé tu comprobante${monto} y tu cita ya quedó pagada ✅ Nos vemos pronto 💈`;
+  return `¡Recibido! Confirmé tu comprobante${monto} y tu cita ya quedó agendada ✅ Nos vemos pronto 💈`;
 }
 
 const TEXTO_EN_REVISION =
   "Recibí tu comprobante 🙏 No pude confirmarlo automáticamente, así que lo va a revisar un asesor de Cieza Barber " +
-  "en breve. Te avisamos apenas quede confirmado.";
+  "en breve. Tranquilo, tu horario queda apartado mientras lo revisamos — te avisamos apenas quede confirmado.";
 
 /**
  * Flujo separado del loop conversacional normal (como el de audio): una
  * imagen no es un mensaje de texto que Claude deba interpretar con tools,
  * es un comprobante que se analiza una sola vez y de forma determinística.
- * Nunca decide "en silencio" — o confirma con evidencia clara, o deja el
- * caso visible para un humano (en_revision + conversación escalada).
+ * La evaluación en sí vive en comprobanteService (compartida con la subida
+ * desde la web); acá solo queda lo propio de WhatsApp: a qué cita atribuir
+ * la foto, qué responderle y cuándo escalar.
  */
 export async function handleImageMessage(
   message: Extract<InboundMessage, { kind: "image" }>,
@@ -48,54 +42,34 @@ export async function handleImageMessage(
     waMessageId: message.id,
   });
 
-  const pendiente = await getCitaPendienteDeComprobante(cliente.id);
+  const pendiente = await getReservaPendienteDeComprobante(cliente.id);
   if (!pendiente) {
     await guardarMensaje({ conversacionId: conversacion.id, rol: "assistant", contenido: SIN_CITA_PENDIENTE });
     await sendTextIfWindowOpen(message.from, SIN_CITA_PENDIENTE);
     return;
   }
 
-  const { cita, depositoEsperado } = pendiente;
+  const { reservaId, depositoEsperado } = pendiente;
 
   let respuesta: string;
   try {
     const { buffer, mimeType } = await descargarMedia(message.mediaId);
-    const extension = EXTENSION_POR_MIME[mimeType] ?? "jpg";
-    const path = `${cita.id}/${Date.now()}.${extension}`;
-
-    const { error: uploadError } = await supabase.storage
-      .from("comprobantes")
-      .upload(path, buffer, { contentType: mimeType });
-    if (uploadError) throw uploadError;
-
-    const analisis = await analizarComprobante({
-      imagenBase64: buffer.toString("base64"),
+    const resultado = await procesarComprobante({
+      reservaId,
+      depositoEsperado,
+      buffer,
       mimeType,
-      montoEsperado: depositoEsperado,
+      origen: "whatsapp",
     });
 
-    if (analisis.pareceComprobanteValido) {
-      await guardarComprobante(cita.id, {
-        estado: "confirmado",
-        path,
-        montoDetectado: analisis.montoDetectado,
-        nota: analisis.razon,
-      });
-      respuesta = textoConfirmado(analisis.montoDetectado);
-      logger.info({ citaId: cita.id, monto: analisis.montoDetectado }, "Comprobante de pago confirmado automáticamente");
+    if (resultado.estado === "confirmado") {
+      respuesta = textoConfirmado(resultado.montoDetectado);
     } else {
-      await guardarComprobante(cita.id, {
-        estado: "en_revision",
-        path,
-        montoDetectado: analisis.montoDetectado,
-        nota: analisis.razon,
-      });
       await escalarConversacion(conversacion.id);
       respuesta = TEXTO_EN_REVISION;
-      logger.warn({ citaId: cita.id, razon: analisis.razon }, "Comprobante de pago no se pudo confirmar automáticamente");
     }
   } catch (err) {
-    logger.error({ err, citaId: cita.id }, "Falló el procesamiento del comprobante de pago");
+    logger.error({ err, reservaId }, "Falló el procesamiento del comprobante de pago");
     await escalarConversacion(conversacion.id).catch(() => {});
     respuesta = TEXTO_EN_REVISION;
   }

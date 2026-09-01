@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { supabase } from "../client.js";
 import { getBusinessHours } from "./businessHours.js";
 import { getBloqueosEnRango } from "./bloqueos.js";
@@ -5,10 +6,21 @@ import { getServiceById } from "./services.js";
 import { getClienteById } from "./clientes.js";
 import { createCalendarEvent, deleteCalendarEvent } from "../../calendar/google.js";
 import { isSlotAvailable, type ExistingCita } from "../../lib/availability.js";
+import { calcularAdelanto, type ServicioConPrecio } from "../../lib/deposito.js";
 import { BUFFER_MINUTES, MIN_LEAD_MINUTES, BUSINESS_TIMEZONE } from "../../config/business.js";
 import { logger } from "../../lib/logger.js";
 
 export type ComprobanteEstado = "sin_comprobante" | "confirmado" | "en_revision";
+
+export type CitaEstado = "pendiente_pago" | "confirmada" | "cancelada" | "completada" | "no_asistio" | "expirada";
+
+/**
+ * Estados que siguen ocupando el horario. 'pendiente_pago' cuenta: una cita
+ * en stand-by por adelanto reserva el hueco igual que una confirmada (es
+ * justo el punto de tenerla), hasta que expira. Espeja el WHERE del EXCLUDE
+ * constraint de la tabla — si uno cambia, el otro también.
+ */
+export const ESTADOS_QUE_OCUPAN: CitaEstado[] = ["pendiente_pago", "confirmada", "completada", "no_asistio"];
 
 export type Cita = {
   id: string;
@@ -16,12 +28,19 @@ export type Cita = {
   servicio_id: string;
   inicio_utc: string;
   fin_utc: string;
-  estado: "confirmada" | "cancelada" | "completada" | "no_asistio";
+  estado: CitaEstado;
   google_event_id: string | null;
   creada_por: "bot" | "humano";
   notas: string | null;
   barbero: string | null;
+  reserva_id: string;
+  upload_token: string;
   comprobante_estado: ComprobanteEstado;
+  comprobante_origen: "whatsapp" | "web" | null;
+  deposito_esperado: number | null;
+  deposito_solicitado_at: string | null;
+  deposito_aviso_at: string | null;
+  deposito_expirado_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -44,6 +63,16 @@ export async function crearCita(params: {
   creadaPor?: "bot" | "humano";
   notas?: string;
   barbero?: string;
+  /**
+   * Monto del adelanto que hay que abonar para separar esta cita. Si viene,
+   * la cita nace en 'pendiente_pago' (stand-by): ocupa el horario pero no
+   * está agendada, y el barrido de depositos.ts la libera si el comprobante
+   * no llega a tiempo.
+   */
+  depositoEsperado?: number | null;
+  /** Agrupa varias citas consecutivas como una sola reserva (un adelanto, un comprobante). */
+  reservaId?: string;
+  uploadToken?: string;
 }): Promise<CrearCitaResult> {
   const desdeRango = new Date(params.inicioUtc.getTime() - 24 * 60 * 60_000);
   const hastaRango = new Date(params.finUtc.getTime() + 24 * 60 * 60_000);
@@ -69,6 +98,8 @@ export async function crearCita(params: {
     return { ok: false, reason: check.reason === "solapamiento" ? "conflicto_horario" : "fuera_de_politica" };
   }
 
+  const enStandBy = params.depositoEsperado != null;
+
   const { data, error } = await supabase
     .from("citas")
     .insert({
@@ -79,6 +110,14 @@ export async function crearCita(params: {
       creada_por: params.creadaPor ?? "bot",
       notas: params.notas ?? null,
       barbero: params.barbero ?? null,
+      estado: enStandBy ? "pendiente_pago" : "confirmada",
+      deposito_esperado: params.depositoEsperado ?? null,
+      // El reloj arranca acá y no cuando el agente redacta el mensaje: es
+      // el mismo instante a efectos prácticos y así no depende de que una
+      // segunda escritura ocurra.
+      deposito_solicitado_at: enStandBy ? new Date().toISOString() : null,
+      ...(params.reservaId ? { reserva_id: params.reservaId } : {}),
+      ...(params.uploadToken ? { upload_token: params.uploadToken } : {}),
     })
     .select("*")
     .single();
@@ -94,63 +133,147 @@ export async function crearCita(params: {
 
   const cita = data as Cita;
 
-  // El calendario nunca bloquea la reserva: si falla, la cita queda
-  // igual creada con google_event_id null, y retrySync.ts la reintenta
-  // después. No se espera bloqueante más que esta llamada en sí (que ya
-  // atrapa sus propios errores y nunca lanza).
-  const [servicio, cliente] = await Promise.all([getServiceById(cita.servicio_id), getClienteById(cita.cliente_id)]);
-  if (servicio && cliente) {
-    const eventId = await createCalendarEvent({
-      servicioNombre: servicio.name,
-      clienteNombre: cliente.nombre,
-      clienteTelefono: cliente.telefono,
-      clienteEmail: cliente.email,
-      inicioUtc: new Date(cita.inicio_utc),
-      finUtc: new Date(cita.fin_utc),
-      notas: cita.notas,
-    });
-    if (eventId) {
-      const { error: updateError } = await supabase.from("citas").update({ google_event_id: eventId }).eq("id", cita.id);
-      if (updateError) {
-        logger.error({ err: updateError, citaId: cita.id }, "No se pudo guardar el google_event_id en la cita");
-      } else {
-        cita.google_event_id = eventId;
-      }
-    }
+  // Una cita en stand-by todavía no va al calendario del staff: puede
+  // desaparecer sola en 10 minutos, y llenar la agenda de eventos que se
+  // crean y se borran solos la vuelve inservible. El evento se crea recién
+  // al confirmar el adelanto (confirmarDepositoCita).
+  if (!enStandBy) {
+    await sincronizarEventoCalendar(cita);
   }
 
   return { ok: true, cita };
 }
 
 /**
- * La cita confirmada más reciente de un cliente que todavía requiere
- * comprobante (tiene adelanto y nadie lo mandó, o el que mandó no se pudo
- * validar). Es la que se usa como "a cuál se refiere esta imagen" cuando
- * llega una foto sin que el cliente aclare a qué cita corresponde.
+ * Crea el evento de Google Calendar de una cita y le guarda el id.
+ *
+ * El calendario nunca bloquea la reserva: si falla, la cita queda igual
+ * creada con google_event_id null, y retrySync.ts la reintenta después. No
+ * se espera bloqueante más que esta llamada en sí (que ya atrapa sus
+ * propios errores y nunca lanza).
  */
-export async function getCitaPendienteDeComprobante(
-  clienteId: string,
-): Promise<{ cita: Cita; depositoEsperado: number } | null> {
-  const { data, error } = await supabase
-    .from("citas")
-    .select("*, services!inner(deposit_amount)")
-    .eq("cliente_id", clienteId)
-    .eq("estado", "confirmada")
-    .neq("comprobante_estado", "confirmado")
-    .not("services.deposit_amount", "is", null)
-    .order("inicio_utc", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error) throw error;
-  if (!data) return null;
+async function sincronizarEventoCalendar(cita: Cita): Promise<void> {
+  const [servicio, cliente] = await Promise.all([getServiceById(cita.servicio_id), getClienteById(cita.cliente_id)]);
+  if (!servicio || !cliente) return;
 
-  const { services, ...cita } = data as Cita & { services: { deposit_amount: number } };
-  return { cita: cita as Cita, depositoEsperado: services.deposit_amount };
+  const eventId = await createCalendarEvent({
+    servicioNombre: servicio.name,
+    clienteNombre: cliente.nombre,
+    clienteTelefono: cliente.telefono,
+    clienteEmail: cliente.email,
+    inicioUtc: new Date(cita.inicio_utc),
+    finUtc: new Date(cita.fin_utc),
+    notas: cita.notas,
+  });
+  if (!eventId) return;
+
+  const { error } = await supabase.from("citas").update({ google_event_id: eventId }).eq("id", cita.id);
+  if (error) {
+    logger.error({ err: error, citaId: cita.id }, "No se pudo guardar el google_event_id en la cita");
+    return;
+  }
+  cita.google_event_id = eventId;
 }
 
-export async function guardarComprobante(
-  citaId: string,
-  params: { estado: ComprobanteEstado; path: string; montoDetectado: number | null; nota: string },
+export type ReservaPendiente = {
+  reservaId: string;
+  citaIds: string[];
+  /** Suma de los adelantos de todos los servicios de la reserva. */
+  depositoEsperado: number;
+};
+
+/**
+ * La reserva más próxima de un cliente que todavía espera comprobante: la
+ * que está en stand-by por el adelanto, o una ya confirmada cuyo comprobante
+ * no se pudo validar. Es la que se usa como "a cuál se refiere esta imagen"
+ * cuando llega una foto sin que el cliente aclare a qué cita corresponde.
+ *
+ * Devuelve la reserva entera y no una cita suelta porque un combo de tres
+ * servicios es UN pago: si se comparara la captura contra el adelanto de una
+ * sola de las tres citas, un Yape por el total se vería como "de más" y uno
+ * parcial pasaría como válido.
+ */
+export async function getReservaPendienteDeComprobante(clienteId: string): Promise<ReservaPendiente | null> {
+  const { data, error } = await supabase
+    .from("citas")
+    .select("id, reserva_id, inicio_utc, deposito_esperado, services!inner(price, deposit_amount)")
+    .eq("cliente_id", clienteId)
+    .in("estado", ["pendiente_pago", "confirmada"])
+    .neq("comprobante_estado", "confirmado")
+    // Solo citas que todavía no terminaron: sin este filtro, una cita vieja
+    // que nunca se pagó quedaría para siempre primera en el orden ascendente
+    // y se llevaría todas las capturas futuras.
+    .gte("fin_utc", new Date().toISOString())
+    .order("inicio_utc", { ascending: true });
+  if (error) throw error;
+
+  const filas = (data ?? []) as unknown as {
+    id: string;
+    reserva_id: string;
+    deposito_esperado: number | null;
+    services: ServicioConPrecio;
+  }[];
+  if (filas.length === 0) return null;
+
+  // La primera fila marca el grupo: viene ordenada por inicio_utc, así que
+  // es la reserva más próxima a ocurrir.
+  const reservaId = filas[0]!.reserva_id;
+  const delGrupo = filas.filter((f) => f.reserva_id === reservaId);
+
+  let total = 0;
+  for (const fila of delGrupo) {
+    const monto = fila.deposito_esperado ?? calcularAdelanto(fila.services);
+    // Sin monto calculable (precio "Consultar") no hay nada que validar
+    // automáticamente: esa reserva la coordina el staff a mano.
+    if (monto == null) return null;
+    total += monto;
+  }
+
+  return { reservaId, citaIds: delGrupo.map((f) => f.id), depositoEsperado: total };
+}
+
+/**
+ * Las citas de una reserva, validando el token que se le entregó al
+ * navegador al reservar. Sin token válido no devuelve nada: es lo único que
+ * impide subirle un comprobante a la reserva de otra persona, porque
+ * /public/* no tiene sesión.
+ */
+export async function getReservaPorToken(
+  reservaId: string,
+  uploadToken: string,
+): Promise<{ citas: Cita[]; depositoEsperado: number } | null> {
+  const { data, error } = await supabase
+    .from("citas")
+    .select("*, services!inner(price, deposit_amount)")
+    .eq("reserva_id", reservaId)
+    .eq("upload_token", uploadToken)
+    .order("inicio_utc", { ascending: true });
+  if (error) throw error;
+
+  const filas = (data ?? []) as (Cita & { services: ServicioConPrecio })[];
+  if (filas.length === 0) return null;
+
+  let total = 0;
+  const citas: Cita[] = [];
+  for (const fila of filas) {
+    const { services, ...cita } = fila;
+    const monto = cita.deposito_esperado ?? calcularAdelanto(services);
+    if (monto == null) return null;
+    total += monto;
+    citas.push(cita as Cita);
+  }
+  return { citas, depositoEsperado: total };
+}
+
+export async function guardarComprobanteReserva(
+  reservaId: string,
+  params: {
+    estado: ComprobanteEstado;
+    path: string;
+    montoDetectado: number | null;
+    nota: string;
+    origen: "whatsapp" | "web";
+  },
 ): Promise<void> {
   const { error } = await supabase
     .from("citas")
@@ -159,9 +282,181 @@ export async function guardarComprobante(
       comprobante_path: params.path,
       comprobante_monto_detectado: params.montoDetectado,
       comprobante_nota: params.nota,
+      comprobante_origen: params.origen,
     })
-    .eq("id", citaId);
+    .eq("reserva_id", reservaId);
   if (error) throw error;
+}
+
+/**
+ * El adelanto llegó y se validó: la reserva entera pasa de stand-by a
+ * agendada y recién ahí entra al calendario del staff. Idempotente por el
+ * filtro de estado — dos comprobantes seguidos no crean dos eventos.
+ */
+export async function confirmarDepositoReserva(reservaId: string): Promise<Cita[]> {
+  const { data, error } = await supabase
+    .from("citas")
+    .update({ estado: "confirmada" })
+    .eq("reserva_id", reservaId)
+    .eq("estado", "pendiente_pago")
+    .select("*");
+  if (error) throw error;
+
+  const citas = (data ?? []) as Cita[];
+  for (const cita of citas) {
+    await sincronizarEventoCalendar(cita);
+  }
+  return citas;
+}
+
+/**
+ * El cliente sí mandó algo pero no se pudo validar solo. Detiene el reloj
+ * poniendo deposito_solicitado_at en null: expirarle el horario a alguien
+ * que ya pagó, solo porque la foto salió borrosa, es peor que dejar el
+ * hueco tomado hasta que un humano lo revise.
+ */
+export async function pausarExpiracionPorRevision(reservaId: string): Promise<void> {
+  const { error } = await supabase
+    .from("citas")
+    .update({ deposito_solicitado_at: null })
+    .eq("reserva_id", reservaId)
+    .eq("estado", "pendiente_pago");
+  if (error) throw error;
+}
+
+export type ReservaEnStandBy = {
+  reservaId: string;
+  clienteId: string;
+  clienteTelefono: string;
+  clienteNombre: string | null;
+  /** Los servicios de la reserva, ya listos para leer ("Corte básico + Facial"). */
+  servicios: string;
+  /** La hora de la primera cita del grupo. */
+  inicioUtc: string;
+  /** Suma de los adelantos del grupo. null solo en filas inconsistentes. */
+  depositoEsperado: number | null;
+  googleEventIds: string[];
+};
+
+export type FilaStandBy = {
+  reserva_id: string;
+  cliente_id: string;
+  inicio_utc: string;
+  google_event_id: string | null;
+  deposito_esperado: number | null;
+  clientes: { nombre: string | null; telefono: string };
+  services: { name: string } & ServicioConPrecio;
+};
+
+/** Colapsa las citas sueltas en reservas: un aviso por reserva, no por servicio. */
+export function agruparStandBy(filas: FilaStandBy[]): ReservaEnStandBy[] {
+  const grupos = new Map<string, FilaStandBy[]>();
+  for (const fila of filas) {
+    const actual = grupos.get(fila.reserva_id);
+    if (actual) actual.push(fila);
+    else grupos.set(fila.reserva_id, [fila]);
+  }
+
+  return [...grupos.entries()].map(([reservaId, delGrupo]) => {
+    const ordenadas = [...delGrupo].sort((a, b) => a.inicio_utc.localeCompare(b.inicio_utc));
+    const primera = ordenadas[0]!;
+
+    let total: number | null = 0;
+    for (const fila of ordenadas) {
+      const monto = fila.deposito_esperado ?? calcularAdelanto(fila.services);
+      if (monto == null) total = null;
+      if (total != null) total += monto!;
+    }
+
+    return {
+      reservaId,
+      clienteId: primera.cliente_id,
+      clienteTelefono: primera.clientes.telefono,
+      clienteNombre: primera.clientes.nombre,
+      servicios: ordenadas.map((f) => f.services.name).join(" + "),
+      inicioUtc: primera.inicio_utc,
+      depositoEsperado: total,
+      googleEventIds: ordenadas.map((f) => f.google_event_id).filter((id): id is string => id != null),
+    };
+  });
+}
+
+/**
+ * Reservas en stand-by cuyo plazo (avisoMinutos o expiraMinutos desde que se
+ * pidió el adelanto) ya venció. `soloSinAviso` filtra las que todavía no
+ * recibieron el recordatorio — el barrido de expiración no lo usa, porque
+ * una reserva se libera igual aunque el aviso intermedio no haya salido.
+ */
+async function listarStandByVencidas(minutos: number, soloSinAviso: boolean): Promise<ReservaEnStandBy[]> {
+  const limite = new Date(Date.now() - minutos * 60_000).toISOString();
+
+  let query = supabase
+    .from("citas")
+    .select(
+      "reserva_id, cliente_id, inicio_utc, google_event_id, deposito_esperado, " +
+        "clientes!inner(nombre, telefono), services!inner(name, price, deposit_amount)",
+    )
+    .eq("estado", "pendiente_pago")
+    .neq("comprobante_estado", "confirmado")
+    .not("deposito_solicitado_at", "is", null)
+    .lte("deposito_solicitado_at", limite);
+  if (soloSinAviso) query = query.is("deposito_aviso_at", null);
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return agruparStandBy((data ?? []) as unknown as FilaStandBy[]);
+}
+
+export function listarReservasParaAvisoDeposito(avisoMinutos: number): Promise<ReservaEnStandBy[]> {
+  return listarStandByVencidas(avisoMinutos, true);
+}
+
+export function listarReservasParaExpirarDeposito(expiraMinutos: number): Promise<ReservaEnStandBy[]> {
+  return listarStandByVencidas(expiraMinutos, false);
+}
+
+/**
+ * Marca el aviso como enviado ANTES de mandarlo, y solo si nadie más lo
+ * marcó (deposito_aviso_at is null). Si el UPDATE no toca ninguna fila, otra
+ * instancia del barrido ganó la carrera y esta no manda nada — misma idea que
+ * reservarNotificacion() para los recordatorios de cita.
+ */
+export async function reservarAvisoDeposito(reservaId: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("citas")
+    .update({ deposito_aviso_at: new Date().toISOString() })
+    .eq("reserva_id", reservaId)
+    .eq("estado", "pendiente_pago")
+    .is("deposito_aviso_at", null)
+    .select("id");
+  if (error) throw error;
+  return (data ?? []).length > 0;
+}
+
+/**
+ * Suelta el horario. No usa cancelarCita() a propósito: esto no es un cliente
+ * cancelando (no aplica la política de 30 min de antelación), es el sistema
+ * liberando una reserva que nunca llegó a pagarse. El estado queda como
+ * 'expirada' y no 'cancelada' para que el staff pueda distinguir "no abonó"
+ * de "se arrepintió".
+ */
+export async function expirarReservaPorFaltaDeDeposito(reservaId: string): Promise<Cita[]> {
+  const { data, error } = await supabase
+    .from("citas")
+    .update({ estado: "expirada", deposito_expirado_at: new Date().toISOString() })
+    .eq("reserva_id", reservaId)
+    .eq("estado", "pendiente_pago")
+    .neq("comprobante_estado", "confirmado")
+    .select("*");
+  if (error) throw error;
+
+  const citas = (data ?? []) as Cita[];
+  // Normalmente no hay evento (las stand-by no se sincronizan), pero una cita
+  // confirmada que el staff haya devuelto a pendiente_pago sí podría tenerlo.
+  for (const cita of citas) {
+    if (cita.google_event_id) await deleteCalendarEvent(cita.google_event_id).catch(() => {});
+  }
+  return citas;
 }
 
 /**
@@ -181,7 +476,7 @@ async function borrarCitaRollback(cita: Cita): Promise<void> {
 }
 
 export type CrearCitasConsecutivasResult =
-  | { ok: true; citas: Cita[] }
+  | { ok: true; citas: Cita[]; reservaId: string; uploadToken: string; depositoTotal: number | null }
   | { ok: false; reason: Extract<CrearCitaResult, { ok: false }>["reason"]; servicioIdFallido: string };
 
 /**
@@ -206,12 +501,25 @@ export async function crearCitasConsecutivas(params: {
   const citasCreadas: Cita[] = [];
   let cursor = params.inicioUtc;
 
+  // Un solo id de reserva y un solo token para todo el grupo: el cliente
+  // paga un adelanto y sube una captura, no uno por servicio.
+  const reservaId = randomUUID();
+  const uploadToken = randomUUID();
+  let depositoTotal: number | null = 0;
+
   for (const servicioId of params.servicioIds) {
     const servicio = await getServiceById(servicioId);
     if (!servicio?.duration_minutes) {
       for (const c of citasCreadas) await borrarCitaRollback(c);
       return { ok: false, reason: "conflicto_horario", servicioIdFallido: servicioId };
     }
+
+    // Si un solo servicio del combo no tiene precio calculable, el grupo
+    // entero queda sin stand-by: no se puede pedir "el 50%" de algo que no
+    // se sabe cuánto cuesta.
+    const adelanto = calcularAdelanto(servicio);
+    if (adelanto == null) depositoTotal = null;
+    else if (depositoTotal != null) depositoTotal += adelanto;
 
     const finUtc = new Date(cursor.getTime() + servicio.duration_minutes * 60_000);
     const resultado = await crearCita({
@@ -220,6 +528,9 @@ export async function crearCitasConsecutivas(params: {
       inicioUtc: cursor,
       finUtc,
       creadaPor: params.creadaPor,
+      depositoEsperado: adelanto,
+      reservaId,
+      uploadToken,
       ...(params.notas ? { notas: params.notas } : {}),
       ...(params.barbero ? { barbero: params.barbero } : {}),
     });
@@ -233,14 +544,28 @@ export async function crearCitasConsecutivas(params: {
     cursor = finUtc;
   }
 
-  return { ok: true, citas: citasCreadas };
+  // Un servicio sin precio en el combo deja al grupo entero fuera del
+  // stand-by: se revierte a confirmada para no dejar citas que van a expirar
+  // sin que nadie pueda pagarlas.
+  if (depositoTotal == null && citasCreadas.some((c) => c.estado === "pendiente_pago")) {
+    await supabase
+      .from("citas")
+      .update({ estado: "confirmada", deposito_esperado: null, deposito_solicitado_at: null })
+      .eq("reserva_id", reservaId);
+    for (const cita of citasCreadas) {
+      cita.estado = "confirmada";
+      await sincronizarEventoCalendar(cita);
+    }
+  }
+
+  return { ok: true, citas: citasCreadas, reservaId, uploadToken, depositoTotal };
 }
 
 async function listarCitasEnRango(desdeUtc: Date, hastaUtc: Date): Promise<ExistingCita[]> {
   const { data, error } = await supabase
     .from("citas")
     .select("inicio_utc,fin_utc")
-    .neq("estado", "cancelada")
+    .in("estado", ESTADOS_QUE_OCUPAN)
     .lt("inicio_utc", hastaUtc.toISOString())
     .gt("fin_utc", desdeUtc.toISOString());
   if (error) throw error;
@@ -261,7 +586,7 @@ export async function listarCitasFuturasPorTelefono(telefono: string): Promise<C
     .from("citas")
     .select("*, clientes!inner(telefono)")
     .eq("clientes.telefono", telefono)
-    .neq("estado", "cancelada")
+    .in("estado", ESTADOS_QUE_OCUPAN)
     .gte("inicio_utc", new Date().toISOString())
     .order("inicio_utc");
   if (error) throw error;
@@ -338,7 +663,15 @@ export async function actualizarEstadoCita(citaId: string, estado: Cita["estado"
     await deleteCalendarEvent((existing as Cita).google_event_id!);
   }
 
-  return data as Cita;
+  const cita = data as Cita;
+  // Confirmar a mano una cita que estaba en stand-by (típico: el staff
+  // revisó un comprobante que el análisis automático no pudo validar) es
+  // lo que la mete al calendario — hasta ahora no tenía evento.
+  if (estado === "confirmada" && !cita.google_event_id) {
+    await sincronizarEventoCalendar(cita);
+  }
+
+  return cita;
 }
 
 export async function reagendarCita(params: {

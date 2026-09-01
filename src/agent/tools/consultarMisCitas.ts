@@ -9,7 +9,10 @@ const inputSchema = z.object({});
 
 export const consultarMisCitasTool: AgentTool<z.infer<typeof inputSchema>> = {
   name: "consultar_mis_citas",
-  description: "Devuelve las citas futuras del cliente que está escribiendo (no requiere parámetros).",
+  description:
+    "Devuelve las citas futuras del cliente que está escribiendo (no requiere parámetros). Ojo con el campo " +
+    "estado: 'confirmada' es una cita agendada de verdad; 'pendiente_pago' significa que solo se le está " +
+    "apartando el horario y todavía falta que mande la captura del adelanto — no la trates como agendada.",
   inputSchema,
   jsonSchema: { type: "object", properties: {} },
   handler: async (_input, ctx) => {

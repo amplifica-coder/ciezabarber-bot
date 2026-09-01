@@ -11,9 +11,13 @@ import { calendarWebhookRoutes } from "./routes/calendarWebhook.js";
 import { syncPendingCitas } from "./calendar/retrySync.js";
 import { sincronizarCambiosCalendar, asegurarCanalWebhook } from "./calendar/pushSync.js";
 import { enviarRecordatoriosPendientes } from "./notifications/recordatorios.js";
+import { barrerDepositosPendientes } from "./notifications/depositos.js";
 
 const CALENDAR_RETRY_INTERVAL_MS = 5 * 60_000;
 const RECORDATORIOS_INTERVAL_MS = 15 * 60_000;
+// Cada minuto: los plazos del adelanto son de 5 y 10 minutos, así que el
+// desfase máximo (un minuto) es aceptable sin volverse un barrido caro.
+const DEPOSITOS_INTERVAL_MS = 60_000;
 // Red de seguridad además del webhook: los push notifications de Google no
 // están garantizados al 100%, así que un barrido cada 5 min deja el
 // desfase máximo acotado aunque se pierda algún aviso.
@@ -86,6 +90,12 @@ setInterval(() => {
     logger.error({ err }, "Fallo el barrido de recordatorios de cita");
   });
 }, RECORDATORIOS_INTERVAL_MS);
+
+setInterval(() => {
+  barrerDepositosPendientes().catch((err: unknown) => {
+    logger.error({ err }, "Fallo el barrido de adelantos pendientes");
+  });
+}, DEPOSITOS_INTERVAL_MS);
 
 // Arranca el canal de webhooks y hace una primera pasada de sincronización
 // sin bloquear el arranque del servidor — si Google tarda o falla, el

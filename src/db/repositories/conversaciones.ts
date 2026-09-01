@@ -30,6 +30,25 @@ export async function getOrCreateConversacionActiva(clienteId: string): Promise<
   return created as Conversacion;
 }
 
+/**
+ * La conversación más reciente del cliente, sea cual sea su estado, sin
+ * crear ninguna. A diferencia de getOrCreateConversacionActiva(), sirve
+ * para los avisos automáticos: si la conversación está escalada, hay que
+ * dejar el mensaje en ESE hilo (el que está mirando el humano) en vez de
+ * abrir uno nuevo en paralelo.
+ */
+export async function getConversacionMasReciente(clienteId: string): Promise<Conversacion | null> {
+  const { data, error } = await supabase
+    .from("conversaciones")
+    .select("*")
+    .eq("cliente_id", clienteId)
+    .order("ultimo_mensaje_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as Conversacion) ?? null;
+}
+
 export async function marcarUltimoMensaje(conversacionId: string): Promise<void> {
   const { error } = await supabase
     .from("conversaciones")

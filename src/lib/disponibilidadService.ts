@@ -1,5 +1,6 @@
 import { getBusinessHours } from "../db/repositories/businessHours.js";
 import { getBloqueosEnRango } from "../db/repositories/bloqueos.js";
+import { ESTADOS_QUE_OCUPAN } from "../db/repositories/citas.js";
 import { supabase } from "../db/client.js";
 import { getAvailableSlots, getLocalWeekdayAndTime, timeStringToUtcDate } from "./availability.js";
 import { BUFFER_MINUTES, MIN_LEAD_MINUTES, SLOT_STEP_MINUTES, BUSINESS_TIMEZONE } from "../config/business.js";
@@ -37,7 +38,7 @@ export async function consultarDisponibilidadReal(params: {
     supabase
       .from("citas")
       .select("inicio_utc,fin_utc")
-      .neq("estado", "cancelada")
+      .in("estado", ESTADOS_QUE_OCUPAN)
       .lt("inicio_utc", hastaUtc.toISOString())
       .gt("fin_utc", desdeUtc.toISOString())
       .then(({ data, error }) => {

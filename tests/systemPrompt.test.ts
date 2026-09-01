@@ -49,6 +49,18 @@ vi.mock("../src/db/repositories/services.js", () => ({
       description: "Diseño de cejas con tinte natural.",
       active: true,
     },
+    {
+      id: "premium",
+      category_id: "cejas",
+      booking_group: "Opcionales",
+      name: "Servicio premium",
+      duration: "1h",
+      duration_minutes: 60,
+      price: "Consultar",
+      deposit_amount: null,
+      description: "Precio según evaluación.",
+      active: true,
+    },
   ]),
 }));
 
@@ -80,10 +92,23 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("Opcionales:");
   });
 
-  it("no incluye adelanto para servicios sin deposit_amount", async () => {
+  it("calcula el adelanto como el 50% del precio cuando no hay deposit_amount", async () => {
     const prompt = await buildSystemPrompt();
     const hennaLine = prompt.split("\n").find((l) => l.includes("Henna"));
-    expect(hennaLine).not.toContain("adelanto");
+    expect(hennaLine).toContain("adelanto S/ 20");
+  });
+
+  it("marca el adelanto como a coordinar cuando el precio no es un número", async () => {
+    const prompt = await buildSystemPrompt();
+    const premiumLine = prompt.split("\n").find((l) => l.includes("Servicio premium"));
+    expect(premiumLine).toContain("adelanto a coordinar");
+  });
+
+  it("le da al agente el número de Yape y la regla del stand-by", async () => {
+    const prompt = await buildSystemPrompt();
+    expect(prompt).toContain("914851374");
+    expect(prompt).toContain("ADELANTO DEL 50%");
+    expect(prompt).toContain("pendiente_pago");
   });
 
   it("incluye la fecha de hoy en formato ISO, para que Claude no la invente", async () => {

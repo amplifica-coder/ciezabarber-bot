@@ -4,7 +4,13 @@ import { getServiceById } from "../../db/repositories/services.js";
 import { findOrCreateByPhone, guardarEmailCliente } from "../../db/repositories/clientes.js";
 import { crearCita } from "../../db/repositories/citas.js";
 import { timeStringToUtcDate } from "../../lib/availability.js";
-import { BUSINESS_TIMEZONE, BARBEROS } from "../../config/business.js";
+import { calcularAdelanto, formatearMonto } from "../../lib/deposito.js";
+import {
+  BUSINESS_TIMEZONE,
+  BARBEROS,
+  DEPOSITO_YAPE_NUMERO,
+  DEPOSITO_EXPIRA_MINUTOS,
+} from "../../config/business.js";
 
 const FECHA_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const HORA_REGEX = /^\d{2}:\d{2}$/;
@@ -22,7 +28,9 @@ const inputSchema = z.object({
 export const agendarCitaTool: AgentTool<z.infer<typeof inputSchema>> = {
   name: "agendar_cita",
   description:
-    "Agenda una cita. fecha y hora deben ser exactamente un valor que devolvió consultar_disponibilidad para ese " +
+    "Reserva una cita. Si el servicio tiene adelanto, la cita queda en stand-by (el horario apartado, la cita NO " +
+    "agendada) hasta que el cliente mande la captura del Yape; el resultado te dice exactamente en qué quedó y " +
+    "qué tienes que responderle. fecha y hora deben ser exactamente un valor que devolvió consultar_disponibilidad para ese " +
     "servicio — nunca inventes ni calcules un horario. nombre_cliente es opcional: solo pídelo si no lo tienes " +
     "ya del contexto de la conversación. correo_cliente es opcional: si el cliente lo da (por ejemplo porque " +
     "quiere la invitación en su Google Calendar), pásalo aquí; nunca lo pidas como requisito para agendar. " +
@@ -57,12 +65,17 @@ export const agendarCitaTool: AgentTool<z.infer<typeof inputSchema>> = {
     const inicioUtc = timeStringToUtcDate(input.fecha, input.hora, BUSINESS_TIMEZONE);
     const finUtc = new Date(inicioUtc.getTime() + servicio.duration_minutes * 60_000);
 
+    // El 50% sale del precio del servicio que se está reservando — no es un
+    // monto que el modelo elija ni que el cliente proponga.
+    const adelanto = calcularAdelanto(servicio);
+
     const result = await crearCita({
       clienteId: cliente.id,
       servicioId: servicio.id,
       inicioUtc,
       finUtc,
       creadaPor: "bot",
+      depositoEsperado: adelanto,
       ...(input.notas ? { notas: input.notas } : {}),
       ...(input.barbero ? { barbero: input.barbero } : {}),
     });
@@ -71,14 +84,33 @@ export const agendarCitaTool: AgentTool<z.infer<typeof inputSchema>> = {
       return { ok: false, error: result.reason };
     }
 
-    return {
-      ok: true,
+    const base = {
+      ok: true as const,
       cita_id: result.cita.id,
       servicio: servicio.name,
       fecha: input.fecha,
       hora: input.hora,
       precio: `S/ ${servicio.price}`,
-      adelanto: servicio.deposit_amount != null ? `S/ ${servicio.deposit_amount}` : "se coordina por WhatsApp",
+    };
+
+    // Sin monto calculable (precio "Consultar") no hay stand-by posible: la
+    // cita queda agendada normal y el adelanto lo coordina el staff.
+    if (adelanto == null) {
+      return { ...base, estado: "confirmada", adelanto: "se coordina por WhatsApp" };
+    }
+
+    return {
+      ...base,
+      estado: "pendiente_pago",
+      adelanto: formatearMonto(adelanto),
+      yape: DEPOSITO_YAPE_NUMERO,
+      minutos_para_pagar: DEPOSITO_EXPIRA_MINUTOS,
+      instrucciones_para_ti:
+        `La cita NO está agendada todavía: le estás apartando el horario. En tu respuesta dile los tres datos ` +
+        `en el mismo mensaje: que abone ${formatearMonto(adelanto)} (50% de adelanto) por Yape al ` +
+        `${DEPOSITO_YAPE_NUMERO}, que te mande la captura por acá, y que si en ${DEPOSITO_EXPIRA_MINUTOS} ` +
+        `minutos no llega la constancia el horario se libera. No le digas que ya quedó agendada ni que está ` +
+        `confirmada — recién lo estará cuando mande el comprobante.`,
     };
   },
 };
