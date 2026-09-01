@@ -24,7 +24,14 @@ export async function requireStaff(authorizationHeader: string | undefined): Pro
     .eq("id", data.user.id)
     .maybeSingle();
   if (profileError) throw profileError;
-  if (profile?.role !== "staff") throw new AppError("Se requiere rol staff", "forbidden", 403);
+  // Un superadmin ES staff con más poderes (mismo criterio que is_staff() en
+  // Postgres) — de lo contrario, promover una cuenta a superadmin le
+  // quitaría acceso a las acciones que pasan por este servidor (el bot usa
+  // la service role key y no está sujeto a las policies de RLS, así que esta
+  // es la única verificación de rol que protege /admin/*).
+  if (profile?.role !== "staff" && profile?.role !== "superadmin") {
+    throw new AppError("Se requiere rol staff", "forbidden", 403);
+  }
 
   return { id: data.user.id, email: data.user.email ?? null };
 }
