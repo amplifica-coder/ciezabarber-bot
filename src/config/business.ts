@@ -5,7 +5,10 @@ import { env } from "./env.js";
 // el negocio: 15 min de buffer entre citas, 2h de anticipación mínima.
 export const BUFFER_MINUTES = 15;
 export const MIN_LEAD_MINUTES = 120;
-export const SLOT_STEP_MINUTES = 30;
+// Los turnos se ofrecen en hora en punto: el corte básico dura 45 min y con
+// el buffer ocupa la hora completa, así que empezar a las :30 solo desalinea
+// la agenda del día sin ganar un cupo real.
+export const SLOT_STEP_MINUTES = 60;
 
 export const BUSINESS_TIMEZONE = env.BUSINESS_TIMEZONE;
 
