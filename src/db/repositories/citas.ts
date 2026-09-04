@@ -183,6 +183,19 @@ export async function crearCita(params: {
  * restricción de Meta que ya vive en recordatorios.ts. Sin plantilla
  * aprobada para este aviso todavía, es el mejor esfuerzo posible hoy.
  */
+/** El celular personal del barbero, desde su cuenta del panel (profiles.phone). */
+async function getCelularBarbero(barbero: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("phone")
+    .eq("barbero", barbero)
+    .not("phone", "is", null)
+    .limit(1)
+    .maybeSingle();
+  if (error) return null;
+  return (data?.phone as string | null) ?? null;
+}
+
 export async function avisarDuenoNuevaCita(citas: Cita[]): Promise<void> {
   try {
     if (citas.length === 0) return;
@@ -205,8 +218,19 @@ export async function avisarDuenoNuevaCita(citas: Cita[]): Promise<void> {
       cuando,
     ];
     if (primera.barbero) lineas.push(`Con ${primera.barbero}`);
+    const mensaje = lineas.join("\n");
 
-    await sendTextIfWindowOpen(env.ESCALATION_PHONE, lineas.join("\n"));
+    // Al dueño siempre (ve todo el negocio).
+    await sendTextIfWindowOpen(env.ESCALATION_PHONE, mensaje);
+
+    // Y al barbero al que le tocó, a su celular personal — es SU agenda la
+    // que cambió. Si es el propio dueño, no se le manda dos veces.
+    if (primera.barbero) {
+      const celular = await getCelularBarbero(primera.barbero);
+      if (celular && celular !== env.ESCALATION_PHONE) {
+        await sendTextIfWindowOpen(celular, `${mensaje}\n\n(Es para ti)`);
+      }
+    }
   } catch (err) {
     logger.error({ err }, "No se pudo avisar al dueño de una cita nueva");
   }
@@ -744,6 +768,74 @@ export async function actualizarEstadoCita(citaId: string, estado: Cita["estado"
   }
 
   return cita;
+}
+
+/** Una cita con lo mínimo para decidir si alguien puede tocarla. */
+export async function getCitaPorId(citaId: string): Promise<Cita | null> {
+  const { data, error } = await supabase.from("citas").select("*").eq("id", citaId).maybeSingle();
+  if (error) throw error;
+  return (data as Cita | null) ?? null;
+}
+
+/**
+ * Lo que el barbero anota después de atender (el corte que hizo, el tono, la
+ * máquina). Distinto de `notas`, que es lo que el cliente pidió al reservar.
+ */
+export async function guardarAtencionNotas(citaId: string, notas: string | null): Promise<void> {
+  const { error } = await supabase
+    .from("citas")
+    .update({ atencion_notas: notas })
+    .eq("id", citaId);
+  if (error) throw error;
+}
+
+/**
+ * Reagendar sin pasar por el teléfono del cliente: lo usa el panel (barbero o
+ * recepción), donde la autorización ya se verificó por rol y por dueño de la
+ * cita. Misma mecánica que reagendarCita — cancelar y volver a crear — para
+ * que la validación de disponibilidad sea exactamente la misma que la de una
+ * cita nueva, incluido el EXCLUDE constraint.
+ */
+export async function reagendarCitaDesdePanel(params: {
+  citaId: string;
+  nuevoInicioUtc: Date;
+}): Promise<CrearCitaResult | { ok: false; reason: "no_encontrada" }> {
+  const existing = await getCitaPorId(params.citaId);
+  if (!existing) return { ok: false, reason: "no_encontrada" };
+
+  const servicio = await getServiceById(existing.servicio_id);
+  if (!servicio?.duration_minutes) return { ok: false, reason: "conflicto_horario" };
+  const nuevoFinUtc = new Date(params.nuevoInicioUtc.getTime() + servicio.duration_minutes * 60_000);
+
+  // Se libera la vieja ANTES de crear la nueva: si no, su propio horario
+  // (y su buffer) chocarían contra el hueco nuevo cuando se mueve poco.
+  const { error: cancelError } = await supabase
+    .from("citas")
+    .update({ estado: "cancelada", notas: "Reagendada" })
+    .eq("id", params.citaId);
+  if (cancelError) throw cancelError;
+  if (existing.google_event_id) await deleteCalendarEvent(existing.google_event_id).catch(() => {});
+
+  const created = await crearCita({
+    clienteId: existing.cliente_id,
+    servicioId: existing.servicio_id,
+    inicioUtc: params.nuevoInicioUtc,
+    finUtc: nuevoFinUtc,
+    creadaPor: existing.creada_por,
+    notas: `Reagendada desde cita ${params.citaId}`,
+    ...(existing.barbero ? { barbero: existing.barbero } : {}),
+  });
+
+  if (!created.ok) {
+    // El horario nuevo no funcionó: se revierte la cancelación para no dejar
+    // al cliente sin cita. El evento de Calendar lo repone retrySync.
+    await supabase
+      .from("citas")
+      .update({ estado: existing.estado, notas: existing.notas, google_event_id: null })
+      .eq("id", params.citaId);
+  }
+
+  return created;
 }
 
 export async function reagendarCita(params: {

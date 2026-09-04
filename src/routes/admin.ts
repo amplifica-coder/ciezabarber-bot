@@ -3,12 +3,23 @@ import { z } from "zod";
 import { env } from "../config/env.js";
 import { logger } from "../lib/logger.js";
 import { AppError } from "../lib/errors.js";
-import { requireStaff } from "../lib/adminAuth.js";
+import { requireStaff, requireEquipo, puedeTocarCita } from "../lib/adminAuth.js";
 import { getConversacionConCliente } from "../db/repositories/conversaciones.js";
 import { guardarMensaje } from "../db/repositories/mensajes.js";
 import { getClienteById } from "../db/repositories/clientes.js";
 import { reservarNotificacion, marcarEnviada, marcarFallida } from "../db/repositories/notificaciones.js";
-import { actualizarEstadoCita } from "../db/repositories/citas.js";
+import {
+  actualizarEstadoCita,
+  getCitaPorId,
+  guardarAtencionNotas,
+  reagendarCitaDesdePanel,
+  crearCita,
+} from "../db/repositories/citas.js";
+import { getServiceById } from "../db/repositories/services.js";
+import { findOrCreateByPhone } from "../db/repositories/clientes.js";
+import { consultarDisponibilidadReal } from "../lib/disponibilidadService.js";
+import { timeStringToUtcDate } from "../lib/availability.js";
+import { BUSINESS_TIMEZONE, BARBEROS } from "../config/business.js";
 import { getBloqueoPorId, eliminarBloqueoPorId } from "../db/repositories/bloqueos.js";
 import { getPlantillaById, urlPublicaPlantilla } from "../db/repositories/plantillasMedia.js";
 import { deleteCalendarEvent } from "../calendar/google.js";
@@ -144,17 +155,153 @@ export async function adminRoutes(app: FastifyInstance) {
    * credenciales de la service account, solo el bot las tiene.
    */
   app.post("/admin/citas/:id/estado", async (request: FastifyRequest, reply: FastifyReply) => {
-    await requireStaff(request.headers.authorization);
+    const user = await requireEquipo(request.headers.authorization);
 
     const parsed = citaEstadoSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ error: "invalid_body", detail: parsed.error.issues });
 
     const { id } = request.params as { id: string };
+    const existente = await getCitaPorId(id);
+    if (!existente) return reply.status(404).send({ error: "cita_no_encontrada" });
+    // Un barbero solo toca lo suyo. El mismo 404 que si no existiera: decirle
+    // "existe pero no es tuya" ya filtra la agenda de un compañero.
+    if (!puedeTocarCita(user, existente.barbero)) return reply.status(404).send({ error: "cita_no_encontrada" });
+
     const cita = await actualizarEstadoCita(id, parsed.data.estado);
     if (!cita) return reply.status(404).send({ error: "cita_no_encontrada" });
 
-    logger.info({ citaId: id, estado: parsed.data.estado }, "Estado de cita actualizado desde el panel");
+    logger.info({ citaId: id, estado: parsed.data.estado, por: user.rol }, "Estado de cita actualizado desde el panel");
     return reply.send({ cita });
+  });
+
+  const atencionSchema = z.object({ atencion_notas: z.string().trim().max(2000) });
+
+  /** Lo que el barbero anota después de atender: el corte, el tono, la máquina. */
+  app.post("/admin/citas/:id/atencion", async (request: FastifyRequest, reply: FastifyReply) => {
+    const user = await requireEquipo(request.headers.authorization);
+
+    const parsed = atencionSchema.safeParse(request.body);
+    if (!parsed.success) return reply.status(400).send({ error: "invalid_body", detail: parsed.error.issues });
+
+    const { id } = request.params as { id: string };
+    const existente = await getCitaPorId(id);
+    if (!existente) return reply.status(404).send({ error: "cita_no_encontrada" });
+    if (!puedeTocarCita(user, existente.barbero)) return reply.status(404).send({ error: "cita_no_encontrada" });
+
+    await guardarAtencionNotas(id, parsed.data.atencion_notas || null);
+    return reply.send({ ok: true });
+  });
+
+  const reagendarSchema = z.object({
+    fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    hora: z.string().regex(/^\d{2}:\d{2}$/),
+  });
+
+  /**
+   * Mover una cita de horario. Pasa por el bot (no un update directo) porque
+   * hay que rehacer el evento de Google Calendar y revalidar el hueco contra
+   * la agenda de esa silla.
+   */
+  app.post("/admin/citas/:id/reagendar", async (request: FastifyRequest, reply: FastifyReply) => {
+    const user = await requireEquipo(request.headers.authorization);
+
+    const parsed = reagendarSchema.safeParse(request.body);
+    if (!parsed.success) return reply.status(400).send({ error: "invalid_body", detail: parsed.error.issues });
+
+    const { id } = request.params as { id: string };
+    const existente = await getCitaPorId(id);
+    if (!existente) return reply.status(404).send({ error: "cita_no_encontrada" });
+    if (!puedeTocarCita(user, existente.barbero)) return reply.status(404).send({ error: "cita_no_encontrada" });
+
+    const nuevoInicioUtc = timeStringToUtcDate(parsed.data.fecha, parsed.data.hora, BUSINESS_TIMEZONE);
+    const resultado = await reagendarCitaDesdePanel({ citaId: id, nuevoInicioUtc });
+    if (!resultado.ok) return reply.status(409).send({ error: resultado.reason });
+
+    logger.info({ citaId: id, nuevaCitaId: resultado.cita.id, por: user.rol }, "Cita reagendada desde el panel");
+    return reply.send({ cita: resultado.cita });
+  });
+
+  const nuevaCitaSchema = z.object({
+    servicio_id: z.string().min(1),
+    fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    hora: z.string().regex(/^\d{2}:\d{2}$/),
+    nombre_cliente: z.string().trim().min(2).max(120),
+    telefono_cliente: z.string().trim().min(6).max(20),
+    barbero: z.enum(BARBEROS).optional(),
+    notas: z.string().trim().max(500).optional(),
+  });
+
+  /**
+   * Cita cargada a mano desde el panel o desde el celular del barbero (un
+   * cliente que llegó sin reservar, o que coordinó directo con él).
+   *
+   * Nace confirmada, sin adelanto: el cliente ya está ahí y de acuerdo — si
+   * entrara en stand-by, el barrido se la liberaría en 10 minutos.
+   */
+  app.post("/admin/citas", async (request: FastifyRequest, reply: FastifyReply) => {
+    const user = await requireEquipo(request.headers.authorization);
+
+    const parsed = nuevaCitaSchema.safeParse(request.body);
+    if (!parsed.success) return reply.status(400).send({ error: "invalid_body", detail: parsed.error.issues });
+    const body = parsed.data;
+
+    // Un barbero solo se agenda a sí mismo, sin importar qué mande el cliente.
+    const barbero = user.rol === "barbero" ? user.barbero : (body.barbero ?? null);
+    if (user.rol === "barbero" && !barbero) {
+      return reply.status(403).send({ error: "sin_barbero_asignado" });
+    }
+
+    const servicio = await getServiceById(body.servicio_id);
+    if (!servicio?.duration_minutes) return reply.status(400).send({ error: "servicio_no_encontrado" });
+
+    const cliente = await findOrCreateByPhone(body.telefono_cliente, body.nombre_cliente);
+    const inicioUtc = timeStringToUtcDate(body.fecha, body.hora, BUSINESS_TIMEZONE);
+    const finUtc = new Date(inicioUtc.getTime() + servicio.duration_minutes * 60_000);
+
+    const resultado = await crearCita({
+      clienteId: cliente.id,
+      servicioId: servicio.id,
+      inicioUtc,
+      finUtc,
+      creadaPor: "humano",
+      ...(barbero ? { barbero } : {}),
+      ...(body.notas ? { notas: body.notas } : {}),
+    });
+    if (!resultado.ok) return reply.status(409).send({ error: resultado.reason });
+
+    logger.info({ citaId: resultado.cita.id, por: user.rol, barbero }, "Cita creada desde el panel");
+    return reply.status(201).send({ cita: resultado.cita });
+  });
+
+  /**
+   * Disponibilidad para el panel. Un barbero solo puede consultar la suya:
+   * los huecos de un compañero son información de su agenda.
+   */
+  app.get("/admin/disponibilidad", async (request: FastifyRequest, reply: FastifyReply) => {
+    const user = await requireEquipo(request.headers.authorization);
+
+    const query = z
+      .object({
+        servicio_id: z.string().min(1),
+        fecha_desde: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        fecha_hasta: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        barbero: z.enum(BARBEROS).optional(),
+      })
+      .safeParse(request.query);
+    if (!query.success) return reply.status(400).send({ error: "invalid_query", detail: query.error.issues });
+
+    const servicio = await getServiceById(query.data.servicio_id);
+    if (!servicio?.duration_minutes) return reply.status(400).send({ error: "servicio_no_encontrado" });
+
+    const barbero = user.rol === "barbero" ? user.barbero : (query.data.barbero ?? null);
+
+    const disponibilidad = await consultarDisponibilidadReal({
+      duracionMinutos: servicio.duration_minutes,
+      fechaDesde: query.data.fecha_desde,
+      fechaHasta: query.data.fecha_hasta ?? query.data.fecha_desde,
+      ...(barbero ? { barbero: barbero as (typeof BARBEROS)[number] } : {}),
+    });
+    return reply.send(disponibilidad);
   });
 
   /**
