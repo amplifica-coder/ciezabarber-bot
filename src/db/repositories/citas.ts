@@ -9,6 +9,9 @@ import { isSlotAvailable, type ExistingCita } from "../../lib/availability.js";
 import { calcularAdelanto, type ServicioConPrecio } from "../../lib/deposito.js";
 import { BUFFER_MINUTES, MIN_LEAD_MINUTES, BUSINESS_TIMEZONE } from "../../config/business.js";
 import { logger } from "../../lib/logger.js";
+import { env } from "../../config/env.js";
+import { sendTextIfWindowOpen } from "../../whatsapp/window.js";
+import { formatearFechaCita } from "../../notifications/recordatorios.js";
 
 export type ComprobanteEstado = "sin_comprobante" | "confirmado" | "en_revision";
 
@@ -139,9 +142,55 @@ export async function crearCita(params: {
   // al confirmar el adelanto (confirmarDepositoCita).
   if (!enStandBy) {
     await sincronizarEventoCalendar(cita);
+    await avisarDuenoNuevaCita([cita]);
   }
 
   return { ok: true, cita };
+}
+
+/**
+ * Avisa al dueño por WhatsApp cuando una cita (o varias, si el cliente
+ * reservó un combo de servicios juntos) pasa a estar REALMENTE agendada —
+ * nunca en el momento de crear un stand-by, que puede liberarse solo en
+ * minutos si no llega el adelanto. Un combo manda un solo mensaje agrupado,
+ * no uno por servicio.
+ *
+ * Mejor esfuerzo: nunca lanza, para que un fallo acá no le eche para atrás
+ * la reserva en sí (quien llama ya la envuelve en catch, pero se repite acá
+ * por si algún día se llama directo).
+ *
+ * Limitación conocida: usa sendTextIfWindowOpen, así que solo llega si el
+ * dueño le escribió al número del bot en las últimas 24h — es la misma
+ * restricción de Meta que ya vive en recordatorios.ts. Sin plantilla
+ * aprobada para este aviso todavía, es el mejor esfuerzo posible hoy.
+ */
+export async function avisarDuenoNuevaCita(citas: Cita[]): Promise<void> {
+  try {
+    if (citas.length === 0) return;
+    const primera = citas[0]!;
+
+    const [cliente, servicios] = await Promise.all([
+      getClienteById(primera.cliente_id),
+      Promise.all(citas.map((c) => getServiceById(c.servicio_id))),
+    ]);
+    if (!cliente) return;
+
+    const nombreCliente = cliente.nombre?.trim() || cliente.telefono;
+    const listaServicios = servicios.map((s) => s?.name ?? "Servicio").join(" + ");
+    const cuando = formatearFechaCita(primera.inicio_utc);
+
+    const lineas = [
+      "📅 Nueva cita agendada",
+      listaServicios,
+      `${nombreCliente} · ${cliente.telefono}`,
+      cuando,
+    ];
+    if (primera.barbero) lineas.push(`Con ${primera.barbero}`);
+
+    await sendTextIfWindowOpen(env.ESCALATION_PHONE, lineas.join("\n"));
+  } catch (err) {
+    logger.error({ err }, "No se pudo avisar al dueño de una cita nueva");
+  }
 }
 
 /**
@@ -306,6 +355,7 @@ export async function confirmarDepositoReserva(reservaId: string): Promise<Cita[
   for (const cita of citas) {
     await sincronizarEventoCalendar(cita);
   }
+  await avisarDuenoNuevaCita(citas);
   return citas;
 }
 
@@ -556,6 +606,7 @@ export async function crearCitasConsecutivas(params: {
       cita.estado = "confirmada";
       await sincronizarEventoCalendar(cita);
     }
+    await avisarDuenoNuevaCita(citasCreadas);
   }
 
   return { ok: true, citas: citasCreadas, reservaId, uploadToken, depositoTotal };
@@ -669,6 +720,7 @@ export async function actualizarEstadoCita(citaId: string, estado: Cita["estado"
   // lo que la mete al calendario — hasta ahora no tenía evento.
   if (estado === "confirmada" && !cita.google_event_id) {
     await sincronizarEventoCalendar(cita);
+    await avisarDuenoNuevaCita([cita]);
   }
 
   return cita;
