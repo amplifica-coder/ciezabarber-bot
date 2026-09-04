@@ -45,7 +45,7 @@ function formatCatalog(services: Service[]): string {
       const lineas = list
         .map((s) => {
           const monto = calcularAdelanto(s);
-          const adelanto = monto != null ? `, adelanto ${formatearMonto(monto)}` : ", adelanto a coordinar";
+          const adelanto = monto != null ? `, pago ${formatearMonto(monto)}` : ", pago a coordinar";
           return `  - ${s.name} (id: ${s.id}) — ${s.duration}, S/ ${s.price}${adelanto}`;
         })
         .join("\n");
@@ -124,15 +124,15 @@ FLUJO TÍPICO PARA AGENDAR
 3. Confirma servicio + fecha + hora con el cliente antes de agendar.
 4. Llama a agendar_cita. Puedes, de paso y sin insistir, ofrecerle mandarle también la invitación a su Google
    Calendar si te da su correo — es un extra, nunca lo pidas como requisito ni le hagas esperar por eso.
-5. Repite por escrito servicio, fecha, hora y dirección, y el adelanto que devolvió la tool. Si dio su correo,
+5. Repite por escrito servicio, fecha, hora y dirección, y el monto a pagar que devolvió la tool. Si dio su correo,
    avísale que también le llegará la invitación al calendario.
-6. Dile que mande la captura del Yape por esta misma conversación (ver ADELANTO más abajo) — se confirma sola
+6. Dile que mande la captura del Yape por esta misma conversación (ver PAGO más abajo) — se confirma sola
    al recibirla.
 
-ADELANTO DEL 50% — CÓMO QUEDA REALMENTE UNA CITA
-Para separar una cita hay que abonar el 50% del precio del servicio por Yape al ${DEPOSITO_YAPE_NUMERO}.
-- El monto NO lo calculas tú ni lo negocias: es el que aparece como "adelanto" en el catálogo de arriba para ese
-  servicio, y el que te devuelve agendar_cita en el campo adelanto. Si el catálogo dice "a coordinar", dile que
+PAGO POR ADELANTADO — CÓMO QUEDA REALMENTE UNA CITA
+Para separar una cita hay que pagarla completa por Yape al ${DEPOSITO_YAPE_NUMERO}, antes de la cita.
+- El monto NO lo calculas tú ni lo negocias: es el que aparece como "pago" en el catálogo de arriba para ese
+  servicio, y el que te devuelve agendar_cita en el campo pago. Si el catálogo dice "a coordinar", dile que
   el monto se lo confirma un asesor, sin inventar una cifra.
 - Cuando agendar_cita devuelve estado "pendiente_pago", la cita NO está agendada: solo le estás apartando el
   horario. Nunca le digas "ya quedó agendada", "confirmada" o "lista" en ese momento. Dile que le estás

@@ -9,7 +9,7 @@ const inputSchema = z.object({
 export const consultarServiciosTool: AgentTool<z.infer<typeof inputSchema>> = {
   name: "consultar_servicios",
   description:
-    "Devuelve el catálogo de servicios activos de Cieza Barber con su nombre, duración, precio y adelanto requerido. " +
+    "Devuelve el catálogo de servicios activos de Cieza Barber con su nombre, duración y precio. " +
     "Usa el parámetro grupo para filtrar por Principales, Complementarios u Opcionales; omítelo para ver todo.",
   inputSchema,
   jsonSchema: {
@@ -26,7 +26,7 @@ export const consultarServiciosTool: AgentTool<z.infer<typeof inputSchema>> = {
       nombre: s.name,
       duracion: s.duration,
       precio: `S/ ${s.price}`,
-      adelanto: s.deposit_amount != null ? `S/ ${s.deposit_amount}` : "no especificado",
+      pago: s.deposit_amount != null ? `S/ ${s.deposit_amount}` : "el precio del servicio",
       descripcion: s.description,
     }));
   },

@@ -65,7 +65,7 @@ export async function analizarComprobante(params: {
             {
               type: "text",
               text:
-                `Esta imagen dice ser el comprobante de un adelanto de S/ ${params.montoEsperado} para una cita ` +
+                `Esta imagen dice ser el comprobante de pago de S/ ${params.montoEsperado} para una cita ` +
                 `en un salón de belleza en Perú (Yape, Plin o transferencia bancaria). Evalúa si es un comprobante ` +
                 `de pago real y si el monto alcanza lo esperado. Ante cualquier duda genuina, marca ` +
                 `parece_comprobante_valido en false — un falso negativo lo revisa una persona; un falso positivo ` +

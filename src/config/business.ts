@@ -34,11 +34,11 @@ export const BARBERO_DESCANSO_DIA: Record<Barbero, number> = {
   Bryan: 1,
 };
 
-// Adelanto para separar la cita: 50% del precio del servicio, por Yape al
+// Para separar la cita se cobra el precio COMPLETO del servicio por Yape al
 // número del negocio. La cita queda en stand-by (ocupa el horario pero no
 // está agendada) hasta que llega el comprobante; si no llega, se libera.
 export const DEPOSITO_YAPE_NUMERO = "914851374";
-export const DEPOSITO_PORCENTAJE = 0.5;
+export const DEPOSITO_PORCENTAJE = 1;
 // Tras el mensaje que pide el adelanto: a los 5 min se le insiste, a los 10
 // (5 + 5) se suelta el horario.
 export const DEPOSITO_AVISO_MINUTOS = 5;

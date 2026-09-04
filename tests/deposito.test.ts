@@ -15,15 +15,15 @@ import {
 import { DEPOSITO_YAPE_NUMERO } from "../src/config/business.js";
 
 describe("calcularAdelanto", () => {
-  it("cobra el 50% del precio del servicio", () => {
-    expect(calcularAdelanto({ price: "40", deposit_amount: null })).toBe(20);
-    expect(calcularAdelanto({ price: "130", deposit_amount: null })).toBe(65);
-    expect(calcularAdelanto({ price: "250", deposit_amount: null })).toBe(125);
+  it("cobra el precio completo del servicio", () => {
+    expect(calcularAdelanto({ price: "40", deposit_amount: null })).toBe(40);
+    expect(calcularAdelanto({ price: "130", deposit_amount: null })).toBe(130);
+    expect(calcularAdelanto({ price: "250", deposit_amount: null })).toBe(250);
   });
 
   it("redondea al sol para no pedir montos con céntimos", () => {
-    expect(calcularAdelanto({ price: "70", deposit_amount: null })).toBe(35);
-    expect(calcularAdelanto({ price: "65", deposit_amount: null })).toBe(33);
+    expect(calcularAdelanto({ price: "70.4", deposit_amount: null })).toBe(70);
+    expect(calcularAdelanto({ price: "32.5", deposit_amount: null })).toBe(33);
   });
 
   it("respeta deposit_amount cuando el staff lo fijó a mano", () => {
@@ -37,7 +37,7 @@ describe("calcularAdelanto", () => {
   });
 
   it("tolera precios escritos con símbolo de moneda", () => {
-    expect(calcularAdelanto({ price: "S/ 80", deposit_amount: null })).toBe(40);
+    expect(calcularAdelanto({ price: "S/ 80", deposit_amount: null })).toBe(80);
   });
 });
 
@@ -48,7 +48,7 @@ describe("formatearMonto", () => {
   });
 });
 
-describe("textos del adelanto", () => {
+describe("textos del pago", () => {
   const datos = { adelanto: 20, servicio: "Corte básico", cuando: "lunes 1 de septiembre a las 3:00 p. m." };
 
   it("el recordatorio dice que la cita todavía no está agendada y cuánto queda", () => {

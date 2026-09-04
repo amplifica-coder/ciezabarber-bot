@@ -26,32 +26,32 @@ vi.mock("../src/config/env.js", () => ({
 vi.mock("../src/db/repositories/services.js", () => ({
   listActiveServices: vi.fn().mockResolvedValue([
     {
-      id: "microblading",
-      category_id: "cejas",
+      id: "corte-barba",
+      category_id: "cortes",
       booking_group: "Principales",
-      name: "Microblading",
-      duration: "2h",
-      duration_minutes: 120,
-      price: "250",
+      name: "Corte + barba",
+      duration: "1h",
+      duration_minutes: 60,
+      price: "60",
       deposit_amount: 50,
-      description: "Técnica de trazos finos.",
+      description: "Corte y perfilado de barba.",
       active: true,
     },
     {
-      id: "henna",
-      category_id: "cejas",
+      id: "corte",
+      category_id: "cortes",
       booking_group: "Opcionales",
-      name: "Henna",
+      name: "Corte clásico",
       duration: "30min",
       duration_minutes: 30,
       price: "40",
       deposit_amount: null,
-      description: "Diseño de cejas con tinte natural.",
+      description: "Corte a máquina y tijera.",
       active: true,
     },
     {
       id: "premium",
-      category_id: "cejas",
+      category_id: "cortes",
       booking_group: "Opcionales",
       name: "Servicio premium",
       duration: "1h",
@@ -83,31 +83,31 @@ const { buildSystemPrompt } = await import("../src/agent/systemPrompt.js");
 describe("buildSystemPrompt", () => {
   it("incluye el catálogo real, agrupado por booking_group", async () => {
     const prompt = await buildSystemPrompt();
-    expect(prompt).toContain("Microblading");
-    expect(prompt).toContain("id: microblading");
-    expect(prompt).toContain("S/ 250");
-    expect(prompt).toContain("adelanto S/ 50");
-    expect(prompt).toContain("Henna");
+    expect(prompt).toContain("Corte + barba");
+    expect(prompt).toContain("id: corte-barba");
+    expect(prompt).toContain("S/ 60");
+    expect(prompt).toContain("pago S/ 50");
+    expect(prompt).toContain("Corte clásico");
     expect(prompt).toContain("Principales:");
     expect(prompt).toContain("Opcionales:");
   });
 
-  it("calcula el adelanto como el 50% del precio cuando no hay deposit_amount", async () => {
+  it("cobra el precio completo cuando el servicio no tiene deposit_amount", async () => {
     const prompt = await buildSystemPrompt();
-    const hennaLine = prompt.split("\n").find((l) => l.includes("Henna"));
-    expect(hennaLine).toContain("adelanto S/ 20");
+    const corteLine = prompt.split("\n").find((l) => l.includes("Corte clásico"));
+    expect(corteLine).toContain("pago S/ 40");
   });
 
-  it("marca el adelanto como a coordinar cuando el precio no es un número", async () => {
+  it("marca el pago como a coordinar cuando el precio no es un número", async () => {
     const prompt = await buildSystemPrompt();
     const premiumLine = prompt.split("\n").find((l) => l.includes("Servicio premium"));
-    expect(premiumLine).toContain("adelanto a coordinar");
+    expect(premiumLine).toContain("pago a coordinar");
   });
 
   it("le da al agente el número de Yape y la regla del stand-by", async () => {
     const prompt = await buildSystemPrompt();
     expect(prompt).toContain("914851374");
-    expect(prompt).toContain("ADELANTO DEL 50%");
+    expect(prompt).toContain("PAGO POR ADELANTADO");
     expect(prompt).toContain("pendiente_pago");
   });
 

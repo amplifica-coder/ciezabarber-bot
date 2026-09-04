@@ -218,7 +218,7 @@ export async function avisarComprobanteEnRevision(reservaId: string, razon: stri
       fila.deposito_esperado != null ? `Esperábamos S/ ${fila.deposito_esperado}` : "",
       `No se pudo validar solo: ${razon}`,
       "",
-      "Su horario está reservado y no se va a liberar. Revisa el comprobante en el panel (Reservas → Esperando adelanto) y confirma la cita a mano.",
+      "Su horario está reservado y no se va a liberar. Revisa el comprobante en el panel (Reservas → Esperando pago) y confirma la cita a mano.",
     ].filter(Boolean);
 
     await sendTextIfWindowOpen(env.ESCALATION_PHONE, lineas.join("\n"));
@@ -652,7 +652,7 @@ export async function crearCitasConsecutivas(params: {
     }
 
     // Si un solo servicio del combo no tiene precio calculable, el grupo
-    // entero queda sin stand-by: no se puede pedir "el 50%" de algo que no
+    // entero queda sin stand-by: no se puede cobrar por adelantado algo que no
     // se sabe cuánto cuesta.
     const adelanto = calcularAdelanto(servicio);
     if (adelanto == null) depositoTotal = null;

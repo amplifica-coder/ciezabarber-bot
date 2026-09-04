@@ -33,7 +33,7 @@ describe("agruparStandBy", () => {
     ] as never);
 
     expect(grupos).toHaveLength(1);
-    // Un combo es UN pago: si se comparara la captura contra el adelanto de
+    // Un combo es UN pago: si se comparara la captura contra el monto de
     // una sola cita, un Yape por el total se vería como "de más".
     expect(grupos[0]!.depositoEsperado).toBe(50);
     expect(grupos[0]!.servicios).toBe("Corte básico + Facial básico");
@@ -54,9 +54,9 @@ describe("agruparStandBy", () => {
     expect(grupos).toHaveLength(2);
   });
 
-  it("recalcula el adelanto del servicio cuando la cita no lo tiene congelado", () => {
+  it("recalcula el monto del servicio cuando la cita no lo tiene congelado", () => {
     const grupos = agruparStandBy([fila({ deposito_esperado: null })] as never);
-    expect(grupos[0]!.depositoEsperado).toBe(20); // 50% de S/ 40
+    expect(grupos[0]!.depositoEsperado).toBe(40); // el precio completo del servicio
   });
 
   it("deja el monto en null si algún servicio del grupo no tiene precio", () => {

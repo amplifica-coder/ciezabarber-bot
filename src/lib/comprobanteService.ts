@@ -82,7 +82,7 @@ export async function procesarComprobante(params: {
     await confirmarDepositoReserva(params.reservaId);
     logger.info(
       { reservaId: params.reservaId, monto: analisis.montoDetectado, origen: params.origen },
-      "Adelanto confirmado, cita agendada",
+      "Pago confirmado, cita agendada",
     );
   } else {
     await pausarExpiracionPorRevision(params.reservaId);

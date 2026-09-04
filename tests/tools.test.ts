@@ -23,13 +23,13 @@ vi.mock("../src/config/env.js", () => ({
 vi.mock("../src/db/repositories/services.js", () => ({
   listActiveServices: vi.fn().mockResolvedValue([
     {
-      id: "microblading",
-      category_id: "cejas",
+      id: "corte-barba",
+      category_id: "cortes",
       booking_group: "Principales",
-      name: "Microblading",
-      duration: "2h",
-      duration_minutes: 120,
-      price: "250",
+      name: "Corte + barba",
+      duration: "1h",
+      duration_minutes: 60,
+      price: "60",
       deposit_amount: 50,
       description: "Técnica de trazos finos.",
       active: true,
@@ -53,22 +53,22 @@ describe("validación de input de tools (Zod)", () => {
 
   it("agendar_cita exige servicio_id, fecha (YYYY-MM-DD) y hora (HH:mm)", () => {
     expect(
-      agendarCitaTool.inputSchema.safeParse({ servicio_id: "microblading", fecha: "2026-08-20", hora: "10:00" })
+      agendarCitaTool.inputSchema.safeParse({ servicio_id: "corte-barba", fecha: "2026-08-20", hora: "10:00" })
         .success,
     ).toBe(true);
     expect(
-      agendarCitaTool.inputSchema.safeParse({ servicio_id: "microblading", fecha: "20-08-2026", hora: "10:00" })
+      agendarCitaTool.inputSchema.safeParse({ servicio_id: "corte-barba", fecha: "20-08-2026", hora: "10:00" })
         .success,
     ).toBe(false);
     expect(
-      agendarCitaTool.inputSchema.safeParse({ servicio_id: "microblading", fecha: "2026-08-20", hora: "10am" })
+      agendarCitaTool.inputSchema.safeParse({ servicio_id: "corte-barba", fecha: "2026-08-20", hora: "10am" })
         .success,
     ).toBe(false);
     expect(agendarCitaTool.inputSchema.safeParse({ fecha: "2026-08-20", hora: "10:00" }).success).toBe(false);
   });
 
   it("agendar_cita acepta correo_cliente opcional, solo si es un email válido", () => {
-    const base = { servicio_id: "microblading", fecha: "2026-08-20", hora: "10:00" };
+    const base = { servicio_id: "corte-barba", fecha: "2026-08-20", hora: "10:00" };
     expect(agendarCitaTool.inputSchema.safeParse(base).success).toBe(true);
     expect(agendarCitaTool.inputSchema.safeParse({ ...base, correo_cliente: "maria@example.com" }).success).toBe(
       true,
@@ -79,13 +79,13 @@ describe("validación de input de tools (Zod)", () => {
   });
 
   it("agendar_cita acepta notas opcional para el staff", () => {
-    const base = { servicio_id: "microblading", fecha: "2026-08-20", hora: "10:00" };
+    const base = { servicio_id: "corte-barba", fecha: "2026-08-20", hora: "10:00" };
     expect(agendarCitaTool.inputSchema.safeParse(base).success).toBe(true);
     expect(agendarCitaTool.inputSchema.safeParse({ ...base, notas: "Alérgico a la tinta." }).success).toBe(true);
   });
 
   it("agendar_cita solo acepta uno de los tres barberos", () => {
-    const base = { servicio_id: "microblading", fecha: "2026-08-20", hora: "10:00" };
+    const base = { servicio_id: "corte-barba", fecha: "2026-08-20", hora: "10:00" };
     expect(agendarCitaTool.inputSchema.safeParse({ ...base, barbero: "Nilton" }).success).toBe(true);
     expect(agendarCitaTool.inputSchema.safeParse({ ...base, barbero: "Juan" }).success).toBe(false);
   });
@@ -122,7 +122,7 @@ describe("executeTool", () => {
     expect(result.isError).toBe(false);
     const parsed = JSON.parse(result.content);
     expect(parsed).toEqual([
-      expect.objectContaining({ servicio_id: "microblading", nombre: "Microblading", precio: "S/ 250" }),
+      expect.objectContaining({ servicio_id: "corte-barba", nombre: "Corte + barba", precio: "S/ 60" }),
     ]);
   });
 

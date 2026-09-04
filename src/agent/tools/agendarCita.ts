@@ -28,7 +28,7 @@ const inputSchema = z.object({
 export const agendarCitaTool: AgentTool<z.infer<typeof inputSchema>> = {
   name: "agendar_cita",
   description:
-    "Reserva una cita. Si el servicio tiene adelanto, la cita queda en stand-by (el horario apartado, la cita NO " +
+    "Reserva una cita. Si el servicio tiene precio, la cita queda en stand-by (el horario apartado, la cita NO " +
     "agendada) hasta que el cliente mande la captura del Yape; el resultado te dice exactamente en qué quedó y " +
     "qué tienes que responderle. fecha y hora deben ser exactamente un valor que devolvió consultar_disponibilidad para ese " +
     "servicio — nunca inventes ni calcules un horario. nombre_cliente es opcional: solo pídelo si no lo tienes " +
@@ -65,8 +65,8 @@ export const agendarCitaTool: AgentTool<z.infer<typeof inputSchema>> = {
     const inicioUtc = timeStringToUtcDate(input.fecha, input.hora, BUSINESS_TIMEZONE);
     const finUtc = new Date(inicioUtc.getTime() + servicio.duration_minutes * 60_000);
 
-    // El 50% sale del precio del servicio que se está reservando — no es un
-    // monto que el modelo elija ni que el cliente proponga.
+    // El monto sale del precio del servicio que se está reservando — no es
+    // algo que el modelo elija ni que el cliente proponga.
     const adelanto = calcularAdelanto(servicio);
 
     const result = await crearCita({
@@ -94,20 +94,20 @@ export const agendarCitaTool: AgentTool<z.infer<typeof inputSchema>> = {
     };
 
     // Sin monto calculable (precio "Consultar") no hay stand-by posible: la
-    // cita queda agendada normal y el adelanto lo coordina el staff.
+    // cita queda agendada normal y el pago lo coordina el staff.
     if (adelanto == null) {
-      return { ...base, estado: "confirmada", adelanto: "se coordina por WhatsApp" };
+      return { ...base, estado: "confirmada", pago: "se coordina por WhatsApp" };
     }
 
     return {
       ...base,
       estado: "pendiente_pago",
-      adelanto: formatearMonto(adelanto),
+      pago: formatearMonto(adelanto),
       yape: DEPOSITO_YAPE_NUMERO,
       minutos_para_pagar: DEPOSITO_EXPIRA_MINUTOS,
       instrucciones_para_ti:
         `La cita NO está agendada todavía: le estás apartando el horario. En tu respuesta dile los tres datos ` +
-        `en el mismo mensaje: que abone ${formatearMonto(adelanto)} (50% de adelanto) por Yape al ` +
+        `en el mismo mensaje: que pague ${formatearMonto(adelanto)} (el servicio completo) por Yape al ` +
         `${DEPOSITO_YAPE_NUMERO}, que te mande la captura por acá, y que si en ${DEPOSITO_EXPIRA_MINUTOS} ` +
         `minutos no llega la constancia el horario se libera. No le digas que ya quedó agendada ni que está ` +
         `confirmada — recién lo estará cuando mande el comprobante.`,

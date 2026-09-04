@@ -3,7 +3,7 @@ import { buildEventBody } from "../src/calendar/eventBuilder.js";
 
 describe("buildEventBody", () => {
   const base = {
-    servicioNombre: "Microblading",
+    servicioNombre: "Corte + barba",
     clienteNombre: "María López",
     clienteTelefono: "51999888777",
     inicioUtc: new Date("2026-08-20T13:00:00.000Z"),
@@ -12,7 +12,7 @@ describe("buildEventBody", () => {
 
   it("arma el título como '<Servicio> — <Nombre>'", () => {
     const event = buildEventBody(base);
-    expect(event.summary).toBe("Microblading — María López");
+    expect(event.summary).toBe("Corte + barba — María López");
   });
 
   it("incluye el teléfono en la descripción", () => {
@@ -32,7 +32,7 @@ describe("buildEventBody", () => {
 
   it("usa 'Cliente' como respaldo si no hay nombre", () => {
     const event = buildEventBody({ ...base, clienteNombre: null });
-    expect(event.summary).toBe("Microblading — Cliente");
+    expect(event.summary).toBe("Corte + barba — Cliente");
   });
 
   it("envía las fechas en UTC (ISO con Z), sin recalcular a hora local", () => {
