@@ -48,6 +48,9 @@ const envSchema = z.object({
   // puede escribir con una plantilla aprobada, de ahí que el nombre sea
   // configurable: cambia según lo que apruebe Meta para este negocio.
   WHATSAPP_TEMPLATE_RECORDATORIO: z.string().default("recordatorio_cita"),
+  // Aviso al dueño/barbero de una cita nueva cuando su ventana de 24h está
+  // cerrada. Vacío = no se manda plantilla (solo queda el aviso del panel).
+  WHATSAPP_TEMPLATE_NUEVA_RESERVA: z.string().default(""),
   WHATSAPP_TEMPLATE_LANG: z.string().default("es"),
   // Respaldo si la tabla `configuracion` no responde; el valor real que se
   // usa a diario se edita desde el admin (Disponibilidad → Recordatorios).

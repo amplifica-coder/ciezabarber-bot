@@ -46,6 +46,8 @@ const promocionSchema = z.object({
 
 const citaEstadoSchema = z.object({
   estado: z.enum(["confirmada", "cancelada", "completada", "no_asistio"]),
+  // Con qué pagó, cuando el panel lo pregunta al dar por atendida la cita.
+  metodo_pago: z.enum(["yape_plin", "tarjeta", "efectivo"]).optional(),
 });
 
 export async function adminRoutes(app: FastifyInstance) {
@@ -167,10 +169,13 @@ export async function adminRoutes(app: FastifyInstance) {
     // "existe pero no es tuya" ya filtra la agenda de un compañero.
     if (!puedeTocarCita(user, existente.barbero)) return reply.status(404).send({ error: "cita_no_encontrada" });
 
-    const cita = await actualizarEstadoCita(id, parsed.data.estado);
+    const cita = await actualizarEstadoCita(id, parsed.data.estado, parsed.data.metodo_pago ?? null);
     if (!cita) return reply.status(404).send({ error: "cita_no_encontrada" });
 
-    logger.info({ citaId: id, estado: parsed.data.estado, por: user.rol }, "Estado de cita actualizado desde el panel");
+    logger.info(
+      { citaId: id, estado: parsed.data.estado, metodoPago: parsed.data.metodo_pago ?? null, por: user.rol },
+      "Estado de cita actualizado desde el panel",
+    );
     return reply.send({ cita });
   });
 

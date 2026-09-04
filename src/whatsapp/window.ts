@@ -1,5 +1,5 @@
 import { supabase } from "../db/client.js";
-import { sendText, sendMedia, type TipoMediaWhatsApp } from "./client.js";
+import { sendText, sendMedia, sendTemplate, type TipoMediaWhatsApp } from "./client.js";
 import { logger } from "../lib/logger.js";
 
 const WINDOW_MS = 24 * 60 * 60_000;
@@ -47,6 +47,38 @@ export async function sendTextIfWindowOpen(telefono: string, body: string): Prom
     return;
   }
   await sendText(telefono, body);
+}
+
+/**
+ * Aviso al staff que no se puede perder: texto libre si la ventana de 24h
+ * está abierta y, si no, la plantilla pre-aprobada con esos mismos datos.
+ *
+ * Nadie del equipo le escribe al número del bot todos los días, así que su
+ * ventana suele estar cerrada justo cuando entra una reserva de madrugada
+ * — que es cuando más falta hace el aviso. Sin plantilla configurada se
+ * comporta como antes (no manda nada y deja el warning).
+ */
+export async function avisarStaff(params: {
+  telefono: string;
+  texto: string;
+  plantilla: string;
+  idioma: string;
+  parametros: string[];
+}): Promise<void> {
+  if (await isWindowOpenFor(params.telefono)) {
+    await sendText(params.telefono, params.texto);
+    return;
+  }
+  if (!params.plantilla) {
+    logger.warn({ telefono: params.telefono }, "Ventana cerrada y sin plantilla de aviso configurada");
+    return;
+  }
+  await sendTemplate({
+    to: params.telefono,
+    plantilla: params.plantilla,
+    idioma: params.idioma,
+    parametros: params.parametros,
+  });
 }
 
 /** ¿Se le puede escribir texto libre a este número ahora mismo? */

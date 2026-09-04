@@ -17,7 +17,11 @@ vi.mock("../src/db/client.js", () => ({ supabase: {} }));
 vi.mock("../src/calendar/google.js", () => ({ createCalendarEvent: vi.fn(), deleteCalendarEvent: vi.fn() }));
 
 const sendTextIfWindowOpenMock = vi.fn().mockResolvedValue(undefined);
-vi.mock("../src/whatsapp/window.js", () => ({ sendTextIfWindowOpen: sendTextIfWindowOpenMock }));
+const avisarStaffMock = vi.fn().mockResolvedValue(undefined);
+vi.mock("../src/whatsapp/window.js", () => ({
+  sendTextIfWindowOpen: sendTextIfWindowOpenMock,
+  avisarStaff: avisarStaffMock,
+}));
 
 const getClienteByIdMock = vi.fn();
 vi.mock("../src/db/repositories/clientes.js", () => ({ getClienteById: getClienteByIdMock }));
@@ -41,6 +45,7 @@ function cita(over: Record<string, unknown> = {}) {
 describe("avisarDuenoNuevaCita", () => {
   beforeEach(() => {
     sendTextIfWindowOpenMock.mockClear();
+    avisarStaffMock.mockClear();
     getClienteByIdMock.mockReset();
     getServiceByIdMock.mockReset();
   });
@@ -49,7 +54,7 @@ describe("avisarDuenoNuevaCita", () => {
     getClienteByIdMock.mockResolvedValue(null);
     getServiceByIdMock.mockResolvedValue({ name: "Corte básico" });
     await avisarDuenoNuevaCita([cita()]);
-    expect(sendTextIfWindowOpenMock).not.toHaveBeenCalled();
+    expect(avisarStaffMock).not.toHaveBeenCalled();
   });
 
   it("arma un solo mensaje con nombre, teléfono, servicio y fecha, al número de escalación", async () => {
@@ -58,8 +63,8 @@ describe("avisarDuenoNuevaCita", () => {
 
     await avisarDuenoNuevaCita([cita()]);
 
-    expect(sendTextIfWindowOpenMock).toHaveBeenCalledTimes(1);
-    const [telefono, texto] = sendTextIfWindowOpenMock.mock.calls[0]!;
+    expect(avisarStaffMock).toHaveBeenCalledTimes(1);
+    const { telefono, texto } = avisarStaffMock.mock.calls[0]![0];
     expect(telefono).toBe("51900000000");
     expect(texto).toContain("Corte básico");
     expect(texto).toContain("Luis Torres");
@@ -72,9 +77,12 @@ describe("avisarDuenoNuevaCita", () => {
 
     await avisarDuenoNuevaCita([cita({ id: "c1" }), cita({ id: "c2", servicio_id: "facial-basico" })]);
 
-    expect(sendTextIfWindowOpenMock).toHaveBeenCalledTimes(1);
-    const texto = sendTextIfWindowOpenMock.mock.calls[0]![1] as string;
+    expect(avisarStaffMock).toHaveBeenCalledTimes(1);
+    const { texto, parametros } = avisarStaffMock.mock.calls[0]![0];
     expect(texto).toContain("Corte básico + Facial básico");
+    // Los mismos datos van como parámetros de la plantilla, por si la
+    // ventana de 24h del dueño está cerrada.
+    expect(parametros[0]).toBe("Corte básico + Facial básico");
   });
 
   it("incluye el barbero cuando la cita lo tiene asignado", async () => {
@@ -83,20 +91,21 @@ describe("avisarDuenoNuevaCita", () => {
 
     await avisarDuenoNuevaCita([cita({ barbero: "Nilton" })]);
 
-    const texto = sendTextIfWindowOpenMock.mock.calls[0]![1] as string;
+    const { texto, parametros } = avisarStaffMock.mock.calls[0]![0];
     expect(texto).toContain("Con Nilton");
+    expect(parametros[3]).toBe("Nilton");
   });
 
   it("con la lista vacía no llama a nada", async () => {
     await avisarDuenoNuevaCita([]);
     expect(getClienteByIdMock).not.toHaveBeenCalled();
-    expect(sendTextIfWindowOpenMock).not.toHaveBeenCalled();
+    expect(avisarStaffMock).not.toHaveBeenCalled();
   });
 
   it("un fallo al mandar el WhatsApp no se propaga (mejor esfuerzo)", async () => {
     getClienteByIdMock.mockResolvedValue({ nombre: "Rosa M.", telefono: "51933333333" });
     getServiceByIdMock.mockResolvedValue({ name: "Corte básico" });
-    sendTextIfWindowOpenMock.mockRejectedValueOnce(new Error("WhatsApp caído"));
+    avisarStaffMock.mockRejectedValueOnce(new Error("WhatsApp caído"));
 
     await expect(avisarDuenoNuevaCita([cita()])).resolves.toBeUndefined();
   });

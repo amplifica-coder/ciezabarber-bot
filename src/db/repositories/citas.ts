@@ -17,7 +17,7 @@ import {
 import { barberosLibresEnHorario } from "../../lib/disponibilidadService.js";
 import { logger } from "../../lib/logger.js";
 import { env } from "../../config/env.js";
-import { sendTextIfWindowOpen } from "../../whatsapp/window.js";
+import { sendTextIfWindowOpen, avisarStaff } from "../../whatsapp/window.js";
 import { formatearFechaCita } from "../../notifications/recordatorios.js";
 
 export type ComprobanteEstado = "sin_comprobante" | "confirmado" | "en_revision";
@@ -51,6 +51,8 @@ export type Cita = {
   deposito_solicitado_at: string | null;
   deposito_aviso_at: string | null;
   deposito_expirado_at: string | null;
+  /** Con qué pagó el cliente. Lo registra el panel al dar por atendida la cita. */
+  metodo_pago: "yape_plin" | "tarjeta" | "efectivo" | null;
   created_at: string;
   updated_at: string;
 };
@@ -263,16 +265,35 @@ export async function avisarDuenoNuevaCita(citas: Cita[]): Promise<void> {
     ];
     if (primera.barbero) lineas.push(`Con ${primera.barbero}`);
     const mensaje = lineas.join("\n");
+    // Los mismos cuatro datos que el cuerpo de la plantilla, en su orden.
+    const parametros = [
+      listaServicios,
+      `${nombreCliente} · ${cliente.telefono}`,
+      cuando,
+      primera.barbero ?? "Sin asignar",
+    ];
 
     // Al dueño siempre (ve todo el negocio).
-    await sendTextIfWindowOpen(env.ESCALATION_PHONE, mensaje);
+    await avisarStaff({
+      telefono: env.ESCALATION_PHONE,
+      texto: mensaje,
+      plantilla: env.WHATSAPP_TEMPLATE_NUEVA_RESERVA,
+      idioma: env.WHATSAPP_TEMPLATE_LANG,
+      parametros,
+    });
 
     // Y al barbero al que le tocó, a su celular personal — es SU agenda la
     // que cambió. Si es el propio dueño, no se le manda dos veces.
     if (primera.barbero) {
       const celular = await getCelularBarbero(primera.barbero);
       if (celular && celular !== env.ESCALATION_PHONE) {
-        await sendTextIfWindowOpen(celular, `${mensaje}\n\n(Es para ti)`);
+        await avisarStaff({
+          telefono: celular,
+          texto: `${mensaje}\n\n(Es para ti)`,
+          plantilla: env.WHATSAPP_TEMPLATE_NUEVA_RESERVA,
+          idioma: env.WHATSAPP_TEMPLATE_LANG,
+          parametros,
+        });
       }
     }
   } catch (err) {
@@ -790,12 +811,20 @@ export async function cancelarCita(citaId: string, telefono: string, motivo?: st
  * justo el paso que el panel se saltaba escribiendo directo a Supabase,
  * dejando el evento huérfano.
  */
-export async function actualizarEstadoCita(citaId: string, estado: Cita["estado"]): Promise<Cita | null> {
+export async function actualizarEstadoCita(
+  citaId: string,
+  estado: Cita["estado"],
+  /** Con qué pagó. Solo se escribe si viene: no pisa lo ya registrado. */
+  metodoPago: Cita["metodo_pago"] = null,
+): Promise<Cita | null> {
   const { data: existing, error: findError } = await supabase.from("citas").select("*").eq("id", citaId).maybeSingle();
   if (findError) throw findError;
   if (!existing) return null;
 
-  const { data, error } = await supabase.from("citas").update({ estado }).eq("id", citaId).select("*").single();
+  const cambios: { estado: Cita["estado"]; metodo_pago?: Cita["metodo_pago"] } = { estado };
+  if (metodoPago) cambios.metodo_pago = metodoPago;
+
+  const { data, error } = await supabase.from("citas").update(cambios).eq("id", citaId).select("*").single();
   if (error) throw error;
 
   if (estado === "cancelada" && (existing as Cita).google_event_id) {
