@@ -7,7 +7,14 @@ import { getClienteById } from "./clientes.js";
 import { createCalendarEvent, deleteCalendarEvent } from "../../calendar/google.js";
 import { isSlotAvailable, type ExistingCita } from "../../lib/availability.js";
 import { calcularAdelanto, type ServicioConPrecio } from "../../lib/deposito.js";
-import { BUFFER_MINUTES, MIN_LEAD_MINUTES, BUSINESS_TIMEZONE } from "../../config/business.js";
+import {
+  BUFFER_MINUTES,
+  MIN_LEAD_MINUTES,
+  BUSINESS_TIMEZONE,
+  BARBERO_DESCANSO_DIA,
+  type Barbero,
+} from "../../config/business.js";
+import { barberosLibresEnHorario } from "../../lib/disponibilidadService.js";
 import { logger } from "../../lib/logger.js";
 import { env } from "../../config/env.js";
 import { sendTextIfWindowOpen } from "../../whatsapp/window.js";
@@ -86,6 +93,16 @@ export async function crearCita(params: {
     listarCitasEnRango(desdeRango, hastaRango),
   ]);
 
+  // Sin barbero pedido, se le asigna el primero libre a esa hora: una cita
+  // sin silla asignada no ocuparía ninguna (el EXCLUDE de la 0022 ignora las
+  // filas con barbero null) y el negocio se quedaría sin saber quién atiende.
+  let barberoAsignado = params.barbero ?? null;
+  if (!barberoAsignado) {
+    const libres = await barberosLibresEnHorario(params.inicioUtc, params.finUtc);
+    barberoAsignado = libres[0] ?? null;
+    if (!barberoAsignado) return { ok: false, reason: "conflicto_horario" };
+  }
+
   const check = isSlotAvailable({
     inicioUtc: params.inicioUtc,
     finUtc: params.finUtc,
@@ -96,6 +113,8 @@ export async function crearCita(params: {
     bufferMinutes: BUFFER_MINUTES,
     minLeadMinutes: MIN_LEAD_MINUTES,
     now: new Date(),
+    barbero: barberoAsignado,
+    diaDescanso: BARBERO_DESCANSO_DIA[barberoAsignado as Barbero],
   });
   if (!check.available) {
     return { ok: false, reason: check.reason === "solapamiento" ? "conflicto_horario" : "fuera_de_politica" };
@@ -112,7 +131,7 @@ export async function crearCita(params: {
       fin_utc: params.finUtc.toISOString(),
       creada_por: params.creadaPor ?? "bot",
       notas: params.notas ?? null,
-      barbero: params.barbero ?? null,
+      barbero: barberoAsignado,
       estado: enStandBy ? "pendiente_pago" : "confirmada",
       deposito_esperado: params.depositoEsperado ?? null,
       // El reloj arranca acá y no cuando el agente redacta el mensaje: es
@@ -615,7 +634,7 @@ export async function crearCitasConsecutivas(params: {
 async function listarCitasEnRango(desdeUtc: Date, hastaUtc: Date): Promise<ExistingCita[]> {
   const { data, error } = await supabase
     .from("citas")
-    .select("inicio_utc,fin_utc")
+    .select("inicio_utc,fin_utc,barbero")
     .in("estado", ESTADOS_QUE_OCUPAN)
     .lt("inicio_utc", hastaUtc.toISOString())
     .gt("fin_utc", desdeUtc.toISOString());
@@ -623,6 +642,7 @@ async function listarCitasEnRango(desdeUtc: Date, hastaUtc: Date): Promise<Exist
   return (data ?? []).map((row) => ({
     inicioUtc: new Date(row.inicio_utc as string),
     finUtc: new Date(row.fin_utc as string),
+    barbero: row.barbero as string | null,
   }));
 }
 

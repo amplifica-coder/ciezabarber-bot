@@ -24,6 +24,9 @@ const disponibilidadQuerySchema = z.object({
   servicio_ids: z.string().min(1),
   fecha_desde: z.string().regex(FECHA_REGEX),
   fecha_hasta: z.string().regex(FECHA_REGEX).optional(),
+  // El modal de la web ya elige barbero antes de mostrar horarios, así que
+  // puede pedir la agenda de ese barbero en concreto.
+  barbero: z.enum(BARBEROS).optional(),
 });
 
 const reservaBodySchema = z.object({
@@ -68,6 +71,7 @@ export async function publicRoutes(app: FastifyInstance) {
       duracionMinutos: duracionTotal,
       fechaDesde: parsed.data.fecha_desde,
       fechaHasta,
+      ...(parsed.data.barbero ? { barbero: parsed.data.barbero } : {}),
     });
     return reply.send(disponibilidad);
   });

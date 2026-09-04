@@ -19,6 +19,18 @@ export const BARBERO_DESCANSO: Record<Barbero, string> = {
   Bryan: "lunes",
 };
 
+/**
+ * El mismo día de descanso, pero como número de Date.getDay() (0=domingo).
+ * El de arriba es para leerlo (prompt del agente); este es para calcular
+ * disponibilidad real por barbero — antes el descanso solo lo respetaba el
+ * selector de fechas de la web, no el servidor.
+ */
+export const BARBERO_DESCANSO_DIA: Record<Barbero, number> = {
+  Cieza: 3,
+  Nilton: 2,
+  Bryan: 1,
+};
+
 // Adelanto para separar la cita: 50% del precio del servicio, por Yape al
 // número del negocio. La cita queda en stand-by (ocupa el horario pero no
 // está agendada) hasta que llega el comprobante; si no llega, se libera.

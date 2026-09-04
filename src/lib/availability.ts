@@ -8,7 +8,12 @@
 
 export type BusinessHourBlock = { weekday: number; opensAt: string; closesAt: string };
 export type Bloqueo = { inicioUtc: Date; finUtc: Date };
-export type ExistingCita = { inicioUtc: Date; finUtc: Date };
+/**
+ * `barbero` null = cita heredada sin asignar: se trata como si ocupara a
+ * todos los barberos. Es deliberadamente conservador — bloquear de más es
+ * preferible a doble-reservar una silla que en la práctica sí está ocupada.
+ */
+export type ExistingCita = { inicioUtc: Date; finUtc: Date; barbero?: string | null };
 
 export type AvailabilityParams = {
   inicioUtc: Date;
@@ -20,13 +25,21 @@ export type AvailabilityParams = {
   bufferMinutes: number;
   minLeadMinutes: number;
   now: Date;
+  /**
+   * Para qué barbero se evalúa el hueco. Sin él, se evalúa como "cualquiera
+   * del local" (comportamiento viejo, una sola silla) — pásalo siempre que
+   * la cita tenga barbero conocido.
+   */
+  barbero?: string | null;
+  /** Día de descanso de ese barbero (Date.getDay(), 0=domingo). */
+  diaDescanso?: number;
 };
 
 export type AvailabilityResult =
   | { available: true }
   | {
       available: false;
-      reason: "anticipacion_insuficiente" | "fuera_de_horario" | "bloqueo" | "solapamiento";
+      reason: "anticipacion_insuficiente" | "fuera_de_horario" | "bloqueo" | "solapamiento" | "descanso";
     };
 
 function rangesOverlap(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date): boolean {
@@ -74,12 +87,21 @@ function isWithinBusinessHours(
 }
 
 export function isSlotAvailable(params: AvailabilityParams): AvailabilityResult {
-  const { inicioUtc, finUtc, timezone, businessHours, bloqueos, existingCitas, bufferMinutes, minLeadMinutes, now } =
-    params;
+  const { inicioUtc, finUtc, timezone, businessHours, bloqueos, bufferMinutes, minLeadMinutes, now } = params;
+
+  // Solo las citas que compiten por ESTA silla: las del mismo barbero, más
+  // las heredadas sin asignar (ver ExistingCita).
+  const existingCitas = params.barbero
+    ? params.existingCitas.filter((c) => c.barbero == null || c.barbero === params.barbero)
+    : params.existingCitas;
 
   const minutesUntilStart = (inicioUtc.getTime() - now.getTime()) / 60_000;
   if (minutesUntilStart < minLeadMinutes) {
     return { available: false, reason: "anticipacion_insuficiente" };
+  }
+
+  if (params.diaDescanso != null && getLocalWeekdayAndTime(inicioUtc, timezone).weekday === params.diaDescanso) {
+    return { available: false, reason: "descanso" };
   }
 
   if (!isWithinBusinessHours(inicioUtc, finUtc, timezone, businessHours)) {
@@ -125,6 +147,9 @@ export function getAvailableSlots(params: {
   minLeadMinutes: number;
   stepMinutes: number;
   now: Date;
+  /** Ver isSlotAvailable: sin barbero se evalúa como una sola silla. */
+  barbero?: string | null;
+  diaDescanso?: number;
 }): SlotCandidate[] {
   const { fechaLocal, durationMinutes, timezone, stepMinutes, ...availabilityBase } = params;
 
