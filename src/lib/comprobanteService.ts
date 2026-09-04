@@ -5,6 +5,7 @@ import {
   guardarComprobanteReserva,
   confirmarDepositoReserva,
   pausarExpiracionPorRevision,
+  avisarComprobanteEnRevision,
 } from "../db/repositories/citas.js";
 
 export type OrigenComprobante = "whatsapp" | "web";
@@ -89,6 +90,11 @@ export async function procesarComprobante(params: {
       { reservaId: params.reservaId, razon: analisis.razon, origen: params.origen },
       "Comprobante de pago no se pudo confirmar automáticamente",
     );
+    // Sin esto el pago se queda mudo esperando a una persona que no sabe que
+    // tiene que mirarlo. Por WhatsApp al menos la conversación se escala y
+    // aparece en el inbox; por la web no hay conversación ninguna — el
+    // cliente pagó y nadie se entera.
+    await avisarComprobanteEnRevision(params.reservaId, analisis.razon);
   }
 
   return { estado, montoDetectado: analisis.montoDetectado, razon: analisis.razon };

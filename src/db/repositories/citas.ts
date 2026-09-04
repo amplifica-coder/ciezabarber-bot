@@ -183,6 +183,50 @@ export async function crearCita(params: {
  * restricción de Meta que ya vive en recordatorios.ts. Sin plantilla
  * aprobada para este aviso todavía, es el mejor esfuerzo posible hoy.
  */
+/**
+ * Un comprobante que el análisis automático no pudo validar necesita que
+ * alguien lo mire — y hasta que eso pase, el cliente ya pagó pero su cita
+ * sigue sin confirmar. Este aviso es lo único que lo hace visible cuando el
+ * pago entró por la web: ahí no hay conversación de WhatsApp que escalar.
+ *
+ * Mejor esfuerzo: nunca lanza — que falle el aviso no puede tumbar el
+ * registro del comprobante, que es lo que de verdad importa.
+ */
+export async function avisarComprobanteEnRevision(reservaId: string, razon: string): Promise<void> {
+  try {
+    const { data, error } = await supabase
+      .from("citas")
+      .select("inicio_utc, deposito_esperado, clientes!inner(nombre, telefono), services!inner(name)")
+      .eq("reserva_id", reservaId)
+      .order("inicio_utc")
+      .limit(1)
+      .maybeSingle();
+    if (error || !data) return;
+
+    const fila = data as unknown as {
+      inicio_utc: string;
+      deposito_esperado: number | null;
+      clientes: { nombre: string | null; telefono: string };
+      services: { name: string };
+    };
+    const nombre = fila.clientes.nombre?.trim() || fila.clientes.telefono;
+
+    const lineas = [
+      "⚠️ Pago por revisar",
+      `${nombre} · ${fila.clientes.telefono}`,
+      `${fila.services.name} — ${formatearFechaCita(fila.inicio_utc)}`,
+      fila.deposito_esperado != null ? `Esperábamos S/ ${fila.deposito_esperado}` : "",
+      `No se pudo validar solo: ${razon}`,
+      "",
+      "Su horario está reservado y no se va a liberar. Revisa el comprobante en el panel (Reservas → Esperando adelanto) y confirma la cita a mano.",
+    ].filter(Boolean);
+
+    await sendTextIfWindowOpen(env.ESCALATION_PHONE, lineas.join("\n"));
+  } catch (err) {
+    logger.error({ err, reservaId }, "No se pudo avisar de un comprobante en revisión");
+  }
+}
+
 /** El celular personal del barbero, desde su cuenta del panel (profiles.phone). */
 async function getCelularBarbero(barbero: string): Promise<string | null> {
   const { data, error } = await supabase
