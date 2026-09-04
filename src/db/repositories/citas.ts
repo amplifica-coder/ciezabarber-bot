@@ -170,6 +170,51 @@ export async function crearCita(params: {
 }
 
 /**
+ * Servicio que YA se hizo: el cliente que entró sin reserva y se atendió en
+ * el momento.
+ *
+ * A diferencia de crearCita, no valida disponibilidad ni anticipación — eso
+ * es para decidir si una cita futura CABE, y esta ya ocurrió: pedirle 2 horas
+ * de anticipación a algo que acaba de pasar lo rechazaría siempre. Tampoco va
+ * al calendario (no hay nada que recordar) ni avisa al dueño (lo está
+ * registrando él mismo).
+ *
+ * Lo único que sí puede fallar es el EXCLUDE de la BD: dos servicios
+ * solapados en la misma silla no existen ni hacia atrás.
+ */
+export async function registrarServicioAtendido(params: {
+  clienteId: string;
+  servicioId: string;
+  inicioUtc: Date;
+  finUtc: Date;
+  barbero: string;
+  metodoPago: NonNullable<Cita["metodo_pago"]>;
+  notas?: string;
+}): Promise<CrearCitaResult> {
+  const { data, error } = await supabase
+    .from("citas")
+    .insert({
+      cliente_id: params.clienteId,
+      servicio_id: params.servicioId,
+      inicio_utc: params.inicioUtc.toISOString(),
+      fin_utc: params.finUtc.toISOString(),
+      creada_por: "humano",
+      notas: params.notas ?? null,
+      barbero: params.barbero,
+      estado: "completada",
+      metodo_pago: params.metodoPago,
+    })
+    .select("*")
+    .single();
+
+  if (error) {
+    if (error.code === "23P01") return { ok: false, reason: "conflicto_horario" };
+    throw error;
+  }
+  return { ok: true, cita: data as Cita };
+}
+
+/**
  * Avisa al dueño por WhatsApp cuando una cita (o varias, si el cliente
  * reservó un combo de servicios juntos) pasa a estar REALMENTE agendada —
  * nunca en el momento de crear un stand-by, que puede liberarse solo en

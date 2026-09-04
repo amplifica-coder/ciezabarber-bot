@@ -14,6 +14,7 @@ import {
   guardarAtencionNotas,
   reagendarCitaDesdePanel,
   crearCita,
+  registrarServicioAtendido,
 } from "../db/repositories/citas.js";
 import { getServiceById } from "../db/repositories/services.js";
 import { findOrCreateByPhone } from "../db/repositories/clientes.js";
@@ -275,6 +276,67 @@ export async function adminRoutes(app: FastifyInstance) {
     if (!resultado.ok) return reply.status(409).send({ error: resultado.reason });
 
     logger.info({ citaId: resultado.cita.id, por: user.rol, barbero }, "Cita creada desde el panel");
+    return reply.status(201).send({ cita: resultado.cita });
+  });
+
+  const servicioAtendidoSchema = z.object({
+    servicio_id: z.string().min(1),
+    barbero: z.enum(BARBEROS),
+    metodo_pago: z.enum(["yape_plin", "tarjeta", "efectivo"]),
+    fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    hora: z.string().regex(/^\d{2}:\d{2}$/),
+    nombre_cliente: z.string().trim().max(120).optional(),
+    telefono_cliente: z.string().trim().max(20).optional(),
+    notas: z.string().trim().max(500).optional(),
+  });
+
+  /**
+   * Servicio ya atendido, cargado desde Control: el cliente que llegó sin
+   * reserva y se fue pagando. Nace completada y con su medio de pago, que es
+   * lo que necesitan el libro de comisiones y el arqueo de caja.
+   *
+   * Sin teléfono se le carga al cliente de mostrador — un registro compartido
+   * a propósito: si se inventara un teléfono por cada uno, la base se llenaría
+   * de fichas fantasma que nunca se van a poder contactar.
+   */
+  app.post("/admin/citas/atendida", async (request: FastifyRequest, reply: FastifyReply) => {
+    const user = await requireEquipo(request.headers.authorization);
+
+    const parsed = servicioAtendidoSchema.safeParse(request.body);
+    if (!parsed.success) return reply.status(400).send({ error: "invalid_body", detail: parsed.error.issues });
+    const body = parsed.data;
+
+    // Un barbero solo se registra servicios a sí mismo: el libro de comisiones
+    // sale de acá y nadie se anota los cortes de un compañero.
+    if (user.rol === "barbero" && user.barbero !== body.barbero) {
+      return reply.status(403).send({ error: "solo_tus_servicios" });
+    }
+
+    const servicio = await getServiceById(body.servicio_id);
+    if (!servicio?.duration_minutes) return reply.status(400).send({ error: "servicio_no_encontrado" });
+
+    const telefono = body.telefono_cliente?.trim() || "mostrador";
+    const nombre = body.nombre_cliente?.trim() || "Cliente de mostrador";
+    const cliente = await findOrCreateByPhone(telefono, nombre);
+
+    const inicioUtc = timeStringToUtcDate(body.fecha, body.hora, BUSINESS_TIMEZONE);
+    const finUtc = new Date(inicioUtc.getTime() + servicio.duration_minutes * 60_000);
+
+    const resultado = await registrarServicioAtendido({
+      clienteId: cliente.id,
+      servicioId: servicio.id,
+      inicioUtc,
+      finUtc,
+      barbero: body.barbero,
+      metodoPago: body.metodo_pago,
+      ...(body.notas ? { notas: body.notas } : {}),
+    });
+    if (!resultado.ok) return reply.status(409).send({ error: resultado.reason });
+
+    logger.info(
+      { citaId: resultado.cita.id, barbero: body.barbero, metodoPago: body.metodo_pago, por: user.rol },
+      "Servicio atendido registrado desde Control",
+    );
     return reply.status(201).send({ cita: resultado.cita });
   });
 
