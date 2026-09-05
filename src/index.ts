@@ -54,12 +54,12 @@ await app.register(cors, {
   allowedHeaders: ["Content-Type", "Authorization"],
 });
 
-await app.register(healthRoutes);
-await app.register(webhookRoutes);
-await app.register(adminRoutes);
-await app.register(publicRoutes);
-await app.register(calendarWebhookRoutes);
-
+// ANTES de registrar las rutas, a propósito: cada `register` crea un contexto
+// encapsulado que hereda el manejador de errores TAL COMO ESTÁ en ese momento.
+// Puesto después, las rutas se quedaban con el de fábrica de Fastify y todos
+// los AppError salían como {statusCode, code, error:"Conflict", message} en vez
+// del formato que el panel sabe leer — de ahí los "No se pudo completar la
+// acción" sin explicación.
 app.setErrorHandler((err, request, reply) => {
   // Un AppError trae un código y un status pensados para el cliente; el
   // resto se colapsa a 500 para no filtrar detalles internos.
@@ -73,6 +73,12 @@ app.setErrorHandler((err, request, reply) => {
   logger.error({ err, url: request.url }, "Error no manejado");
   return reply.status(500).send({ error: "internal_error" });
 });
+
+await app.register(healthRoutes);
+await app.register(webhookRoutes);
+await app.register(adminRoutes);
+await app.register(publicRoutes);
+await app.register(calendarWebhookRoutes);
 
 try {
   await app.listen({ port: env.PORT, host: "0.0.0.0" });

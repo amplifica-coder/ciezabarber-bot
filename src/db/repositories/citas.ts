@@ -878,8 +878,9 @@ export async function actualizarEstadoCita(
     // estado que ocupa la haría chocar, y Postgres no lo permite.
     if (error.code === "23P01") {
       throw new AppError(
-        "Otra cita del mismo barbero ya ocupa ese horario. Si de verdad lo atendiste, muévela de hora " +
-          "o cárgalo desde Control → Registrar servicio.",
+        "Otra cita del mismo barbero ya ocupa ese horario. Marca esa otra como cancelada o no asistió " +
+          "(o muévela de hora) y vuelve a intentar; si el cliente vino sin reserva, cárgalo desde " +
+          "Control → Registrar servicio.",
         "conflicto_horario",
         409,
       );
