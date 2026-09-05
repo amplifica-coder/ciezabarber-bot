@@ -258,7 +258,13 @@ export async function adminRoutes(app: FastifyInstance) {
     }
 
     const servicio = await getServiceById(body.servicio_id);
-    if (!servicio?.duration_minutes) return reply.status(400).send({ error: "servicio_no_encontrado" });
+    if (!servicio) return reply.status(400).send({ error: "servicio_no_encontrado" });
+    if (!servicio.duration_minutes) {
+      return reply.status(400).send({
+        error: "servicio_sin_duracion",
+        mensaje: `"${servicio.name}" no tiene duración en minutos: edítalo en Servicios y guarda la duración.`,
+      });
+    }
 
     const cliente = await findOrCreateByPhone(body.telefono_cliente, body.nombre_cliente);
     const inicioUtc = timeStringToUtcDate(body.fecha, body.hora, BUSINESS_TIMEZONE);
@@ -313,7 +319,15 @@ export async function adminRoutes(app: FastifyInstance) {
     }
 
     const servicio = await getServiceById(body.servicio_id);
-    if (!servicio?.duration_minutes) return reply.status(400).send({ error: "servicio_no_encontrado" });
+    if (!servicio) return reply.status(400).send({ error: "servicio_no_encontrado" });
+    // Un servicio cargado desde el panel puede no tener los minutos puestos.
+    // Decirlo con su nombre evita el clásico "no se pudo" sin pistas.
+    if (!servicio.duration_minutes) {
+      return reply.status(400).send({
+        error: "servicio_sin_duracion",
+        mensaje: `"${servicio.name}" no tiene duración en minutos: edítalo en Servicios y guarda la duración.`,
+      });
+    }
 
     const telefono = body.telefono_cliente?.trim() || "mostrador";
     const nombre = body.nombre_cliente?.trim() || "Cliente de mostrador";
@@ -358,7 +372,13 @@ export async function adminRoutes(app: FastifyInstance) {
     if (!query.success) return reply.status(400).send({ error: "invalid_query", detail: query.error.issues });
 
     const servicio = await getServiceById(query.data.servicio_id);
-    if (!servicio?.duration_minutes) return reply.status(400).send({ error: "servicio_no_encontrado" });
+    if (!servicio) return reply.status(400).send({ error: "servicio_no_encontrado" });
+    if (!servicio.duration_minutes) {
+      return reply.status(400).send({
+        error: "servicio_sin_duracion",
+        mensaje: `"${servicio.name}" no tiene duración en minutos: edítalo en Servicios y guarda la duración.`,
+      });
+    }
 
     const barbero = user.rol === "barbero" ? user.barbero : (query.data.barbero ?? null);
 
