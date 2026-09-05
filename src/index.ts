@@ -65,7 +65,10 @@ app.setErrorHandler((err, request, reply) => {
   // resto se colapsa a 500 para no filtrar detalles internos.
   if (err instanceof AppError) {
     logger.warn({ err: err.message, code: err.code, url: request.url }, "Error controlado");
-    return reply.status(err.statusCode).send({ error: err.code });
+    // El `mensaje` viaja para que el panel muestre el motivo real en vez de
+    // un "no se pudo" genérico: son textos que escribimos nosotros, no
+    // internals sueltos.
+    return reply.status(err.statusCode).send({ error: err.code, mensaje: err.message });
   }
   logger.error({ err, url: request.url }, "Error no manejado");
   return reply.status(500).send({ error: "internal_error" });

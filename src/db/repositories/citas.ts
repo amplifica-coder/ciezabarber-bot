@@ -6,6 +6,7 @@ import { getServiceById } from "./services.js";
 import { getClienteById } from "./clientes.js";
 import { createCalendarEvent, deleteCalendarEvent } from "../../calendar/google.js";
 import { isSlotAvailable, type ExistingCita } from "../../lib/availability.js";
+import { AppError } from "../../lib/errors.js";
 import { calcularAdelanto, type ServicioConPrecio } from "../../lib/deposito.js";
 import {
   BUFFER_MINUTES,
@@ -870,7 +871,23 @@ export async function actualizarEstadoCita(
   if (metodoPago) cambios.metodo_pago = metodoPago;
 
   const { data, error } = await supabase.from("citas").update(cambios).eq("id", citaId).select("*").single();
-  if (error) throw error;
+  if (error) {
+    // 23P01 = exclusion_violation. Pasa al revivir una cita que estaba
+    // cancelada o liberada: mientras lo estuvo, el EXCLUDE la ignoraba y otra
+    // cita pudo tomar esa hora con el mismo barbero. Volver a ponerla en un
+    // estado que ocupa la haría chocar, y Postgres no lo permite.
+    if (error.code === "23P01") {
+      throw new AppError(
+        "Otra cita del mismo barbero ya ocupa ese horario. Si de verdad lo atendiste, muévela de hora " +
+          "o cárgalo desde Control → Registrar servicio.",
+        "conflicto_horario",
+        409,
+      );
+    }
+    // Cualquier otro fallo de la BD viaja con su mensaje: esto lo ve solo el
+    // staff en el panel, y un "no se pudo" a secas no se puede diagnosticar.
+    throw new AppError(`No se pudo actualizar la cita: ${error.message}`, "db_error", 500);
+  }
 
   if (estado === "cancelada" && (existing as Cita).google_event_id) {
     await deleteCalendarEvent((existing as Cita).google_event_id!);

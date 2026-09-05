@@ -22,6 +22,8 @@ const citaGuardada = {
   metodo_pago: null,
 };
 
+let errorUpdate: { code: string; message: string } | null = null;
+
 vi.mock("../src/db/client.js", () => ({
   supabase: {
     from: () => ({
@@ -32,7 +34,12 @@ vi.mock("../src/db/client.js", () => ({
         updateSpy(cambios);
         return {
           eq: () => ({
-            select: () => ({ single: async () => ({ data: { ...citaGuardada, ...cambios }, error: null }) }),
+            select: () => ({
+              single: async () => ({
+                data: errorUpdate ? null : { ...citaGuardada, ...cambios },
+                error: errorUpdate,
+              }),
+            }),
           }),
         };
       },
@@ -48,7 +55,10 @@ vi.mock("../src/calendar/google.js", () => ({
 const { actualizarEstadoCita } = await import("../src/db/repositories/citas.js");
 
 describe("actualizarEstadoCita — método de pago", () => {
-  beforeEach(() => updateSpy.mockClear());
+  beforeEach(() => {
+    updateSpy.mockClear();
+    errorUpdate = null;
+  });
 
   it("guarda con qué pagó cuando el panel lo manda", async () => {
     const cita = await actualizarEstadoCita("c1", "completada", "efectivo");
@@ -59,5 +69,23 @@ describe("actualizarEstadoCita — método de pago", () => {
   it("no toca metodo_pago cuando no viene: cambiar de estado no borra lo ya cobrado", async () => {
     await actualizarEstadoCita("c1", "no_asistio");
     expect(updateSpy).toHaveBeenCalledWith({ estado: "no_asistio" });
+  });
+
+  // Revivir una cita liberada choca contra el EXCLUDE si otra tomó su hora.
+  // Sin traducirlo, el panel solo mostraba "no se pudo completar la acción".
+  it("traduce el choque del EXCLUDE a un 409 con explicación", async () => {
+    errorUpdate = { code: "23P01", message: 'conflicting key value violates exclusion constraint' };
+    await expect(actualizarEstadoCita("c1", "completada")).rejects.toMatchObject({
+      code: "conflicto_horario",
+      statusCode: 409,
+    });
+  });
+
+  it("cualquier otro fallo de la BD viaja con su mensaje, no como un 500 mudo", async () => {
+    errorUpdate = { code: "23514", message: "violates check constraint citas_metodo_pago_check" };
+    await expect(actualizarEstadoCita("c1", "completada")).rejects.toMatchObject({
+      code: "db_error",
+      message: expect.stringContaining("citas_metodo_pago_check"),
+    });
   });
 });
