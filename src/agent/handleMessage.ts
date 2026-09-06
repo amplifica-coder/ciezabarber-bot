@@ -7,6 +7,7 @@ import { guardarMensaje } from "../db/repositories/mensajes.js";
 import { sendTextIfWindowOpen } from "../whatsapp/window.js";
 import { runAgent, FALLBACK_MESSAGE } from "./runner.js";
 import { handleImageMessage } from "./handleImageMessage.js";
+import { leerCodigoDeMensaje, canjearCodigoDesdeWhatsapp } from "../db/repositories/cuentaCliente.js";
 import type { InboundMessage } from "../whatsapp/parser.js";
 
 const AGENT_TIMEOUT_MS = 25_000;
@@ -82,6 +83,27 @@ export async function handleInboundMessage(message: InboundMessage): Promise<voi
     waMessageId: message.id,
   });
   await marcarUltimoMensaje(conversacion.id);
+
+  // Vincular la cuenta del sitio se resuelve acá y no en el agente: es una
+  // operación exacta (un código o no lo es) y dejársela al modelo abriría la
+  // puerta a que "vincule" con un código inventado o mal leído.
+  const codigo = leerCodigoDeMensaje(userText);
+  if (codigo) {
+    const resultado = await canjearCodigoDesdeWhatsapp({
+      telefono: cliente.telefono,
+      codigo,
+      clienteId: cliente.id,
+    });
+    const texto = resultado.ok
+      ? "¡Listo! Tu cuenta quedó vinculada 🙌 Vuelve a la página y ya vas a ver tus citas y tus recompensas."
+      : resultado.razon === "cuenta_con_otro_numero"
+        ? "Esa cuenta ya está vinculada a otro número de WhatsApp. Entra con el correo que usaste la primera vez."
+        : "Ese código ya venció o no es válido. Genera uno nuevo desde la página y vuelve a enviarlo 🙏";
+    logger.info({ telefono: cliente.telefono, ok: resultado.ok }, "Intento de vínculo de cuenta por WhatsApp");
+    await guardarMensaje({ conversacionId: conversacion.id, rol: "assistant", contenido: texto });
+    await sendTextIfWindowOpen(message.from, texto);
+    return;
+  }
 
   let respuesta: string;
   try {

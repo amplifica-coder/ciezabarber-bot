@@ -6,6 +6,7 @@ import { AppError } from "./lib/errors.js";
 import { healthRoutes } from "./routes/health.js";
 import { webhookRoutes } from "./routes/webhook.js";
 import { adminRoutes } from "./routes/admin.js";
+import { clienteRoutes } from "./routes/cliente.js";
 import { publicRoutes } from "./routes/public.js";
 import { calendarWebhookRoutes } from "./routes/calendarWebhook.js";
 import { syncPendingCitas } from "./calendar/retrySync.js";
@@ -78,6 +79,7 @@ await app.register(healthRoutes);
 await app.register(webhookRoutes);
 await app.register(adminRoutes);
 await app.register(publicRoutes);
+await app.register(clienteRoutes);
 await app.register(calendarWebhookRoutes);
 
 try {
