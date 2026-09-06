@@ -107,7 +107,7 @@ describe("requireEquipo y alcance del barbero", () => {
   it("un barbero solo puede tocar sus propias citas", () => {
     const nilton = { id: "u1", email: null, rol: "barbero" as const, barbero: "Nilton" };
     expect(puedeTocarCita(nilton, "Nilton")).toBe(true);
-    expect(puedeTocarCita(nilton, "Bryan")).toBe(false);
+    expect(puedeTocarCita(nilton, "Brayan")).toBe(false);
     expect(puedeTocarCita(nilton, null)).toBe(false);
   });
 
@@ -115,7 +115,7 @@ describe("requireEquipo y alcance del barbero", () => {
     const staff = { id: "u2", email: null, rol: "staff" as const, barbero: null };
     const dueno = { id: "u3", email: null, rol: "superadmin" as const, barbero: "Cieza" };
     for (const quien of [staff, dueno]) {
-      expect(puedeTocarCita(quien, "Bryan")).toBe(true);
+      expect(puedeTocarCita(quien, "Brayan")).toBe(true);
       expect(puedeTocarCita(quien, null)).toBe(true);
     }
   });

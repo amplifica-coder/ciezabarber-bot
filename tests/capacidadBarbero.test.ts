@@ -28,7 +28,7 @@ describe("capacidad por barbero", () => {
 
   /**
    * El bug que esto previene: antes la barbería se modelaba como una sola
-   * silla, así que una cita de Cieza a las 3pm dejaba a Nilton y Bryan sin
+   * silla, así que una cita de Cieza a las 3pm dejaba a Nilton y Brayan sin
    * poder atender a esa hora — dos tercios de la capacidad real perdidos.
    */
   it("la cita de un barbero NO bloquea a los otros", () => {
@@ -60,20 +60,20 @@ describe("capacidad por barbero", () => {
    */
   it("una cita sin barbero asignado bloquea a todos", () => {
     const sinAsignar: ExistingCita = { inicioUtc: lunes3pm, finUtc: lunes4pm, barbero: null };
-    for (const barbero of ["Cieza", "Nilton", "Bryan"]) {
+    for (const barbero of ["Cieza", "Nilton", "Brayan"]) {
       const r = isSlotAvailable({ ...base, inicioUtc: lunes3pm, finUtc: lunes4pm, existingCitas: [sinAsignar], barbero });
       expect(r.available, `debería bloquear a ${barbero}`).toBe(false);
     }
   });
 
   it("respeta el día de descanso del barbero", () => {
-    // Lunes descansa Bryan (BARBERO_DESCANSO_DIA.Bryan = 1).
+    // Lunes descansa Brayan (BARBERO_DESCANSO_DIA.Brayan = 1).
     const r = isSlotAvailable({
       ...base,
       inicioUtc: lunes3pm,
       finUtc: lunes4pm,
       existingCitas: [],
-      barbero: "Bryan",
+      barbero: "Brayan",
       diaDescanso: 1,
     });
     expect(r).toEqual({ available: false, reason: "descanso" });
@@ -112,7 +112,7 @@ describe("capacidad por barbero", () => {
       durationMinutes: 60,
       stepMinutes: 30,
       existingCitas: [],
-      barbero: "Bryan",
+      barbero: "Brayan",
       diaDescanso: 1,
     });
     expect(slots).toEqual([]);

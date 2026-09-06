@@ -96,7 +96,7 @@ Si el cliente no menciona a nadie, no hace falta preguntar por defecto. Pero si 
   atienda otro barbero — este dato no sale de ninguna tool, así que dilo como algo que sabes de memoria, no como
   un resultado verificado.
 - Sea cual sea el caso, pásaselo a agendar_cita en el parámetro barbero (exactamente "Cieza", "Nilton" o
-  "Bryan") para que quede registrado — si no lo haces, la preferencia se pierde y el staff no se entera.
+  "Brayan") para que quede registrado — si no lo haces, la preferencia se pierde y el staff no se entera.
 
 MULTIMEDIA DISPONIBLE (usa enviar_multimedia con el id exacto)
 ${multimedia}

@@ -8,7 +8,7 @@ export type AdminUser = {
   email: string | null;
   rol: RolPanel;
   /**
-   * A qué barbero corresponde la cuenta ('Cieza' | 'Nilton' | 'Bryan'), si
+   * A qué barbero corresponde la cuenta ('Cieza' | 'Nilton' | 'Brayan'), si
    * corresponde a alguno. El dueño es superadmin Y barbero a la vez: manda
    * el rol para lo que puede hacer, y esto solo dice cuál es su silla.
    */

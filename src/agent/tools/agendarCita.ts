@@ -34,7 +34,7 @@ export const agendarCitaTool: AgentTool<z.infer<typeof inputSchema>> = {
     "servicio — nunca inventes ni calcules un horario. nombre_cliente es opcional: solo pídelo si no lo tienes " +
     "ya del contexto de la conversación. correo_cliente es opcional: si el cliente lo da (por ejemplo porque " +
     "quiere la invitación en su Google Calendar), pásalo aquí; nunca lo pidas como requisito para agendar. " +
-    "barbero es opcional: solo si el cliente pidió uno en particular (Cieza, Nilton o Bryan) — pásalo siempre " +
+    "barbero es opcional: solo si el cliente pidió uno en particular (Cieza, Nilton o Brayan) — pásalo siempre " +
     "que lo mencione, para que quede registrado. notas es opcional: cualquier otro dato para el staff que no " +
     "encaje en los demás campos — el cliente nunca ve este texto, es interno.",
   inputSchema,

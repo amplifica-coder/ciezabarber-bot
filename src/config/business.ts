@@ -14,12 +14,12 @@ export const BUSINESS_TIMEZONE = env.BUSINESS_TIMEZONE;
 
 // Mismos 3 nombres que web/assets/booking.js — si se agrega o quita un
 // barbero, hay que tocar los dos lados (no hay tabla `barberos` todavía).
-export const BARBEROS = ["Cieza", "Nilton", "Bryan"] as const;
+export const BARBEROS = ["Cieza", "Nilton", "Brayan"] as const;
 export type Barbero = (typeof BARBEROS)[number];
 export const BARBERO_DESCANSO: Record<Barbero, string> = {
   Cieza: "miércoles",
   Nilton: "martes",
-  Bryan: "lunes",
+  Brayan: "lunes",
 };
 
 /**
@@ -31,7 +31,7 @@ export const BARBERO_DESCANSO: Record<Barbero, string> = {
 export const BARBERO_DESCANSO_DIA: Record<Barbero, number> = {
   Cieza: 3,
   Nilton: 2,
-  Bryan: 1,
+  Brayan: 1,
 };
 
 // Para separar la cita se cobra el precio COMPLETO del servicio por Yape al
