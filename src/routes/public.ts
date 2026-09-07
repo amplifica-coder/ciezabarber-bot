@@ -3,6 +3,8 @@ import { z } from "zod";
 import { env } from "../config/env.js";
 import { logger } from "../lib/logger.js";
 import { isRateLimited } from "../lib/rateLimit.js";
+import { requireCliente } from "../lib/clienteAuth.js";
+import { vincularSiFichaNueva } from "../db/repositories/cuentaCliente.js";
 import { consultarDisponibilidadReal } from "../lib/disponibilidadService.js";
 import { getServiceById } from "../db/repositories/services.js";
 import { findOrCreateByPhone } from "../db/repositories/clientes.js";
@@ -109,6 +111,23 @@ export async function publicRoutes(app: FastifyInstance) {
     if (!resultado.ok) {
       logger.warn({ reason: resultado.reason, servicioIdFallido: resultado.servicioIdFallido }, "Reserva web rechazada");
       return reply.status(409).send({ error: resultado.reason, servicio_id_fallido: resultado.servicioIdFallido });
+    }
+
+    // Si reservó con la sesión del sitio abierta, la ficha queda atada a su
+    // cuenta para que la cita le aparezca en "Mi cuenta" sin hacer nada más.
+    // Best-effort: que falle el enlace no puede tumbar una reserva ya creada.
+    if (request.headers.authorization) {
+      try {
+        const { authUserId, email } = await requireCliente(request.headers.authorization);
+        await vincularSiFichaNueva({
+          authUserId,
+          email,
+          clienteId: cliente.id,
+          citaIdsRecien: resultado.citas.map((c) => c.id),
+        });
+      } catch (err) {
+        logger.warn({ err }, "No se pudo atar la reserva a la cuenta del sitio");
+      }
     }
 
     const enStandBy = resultado.citas.some((c) => c.estado === "pendiente_pago");

@@ -1,15 +1,9 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { env } from "../config/env.js";
-import { BOT_WHATSAPP_NUMERO } from "../config/business.js";
 import { logger } from "../lib/logger.js";
 import { requireCliente } from "../lib/clienteAuth.js";
-import {
-  crearCodigoVinculo,
-  clienteVinculado,
-  acreditarSaldo,
-  FRASE_VINCULO,
-} from "../db/repositories/cuentaCliente.js";
+import { clienteVinculado, vincularPorEmail, acreditarSaldo } from "../db/repositories/cuentaCliente.js";
 import { cancelarCita, getCitaPorId } from "../db/repositories/citas.js";
 import { getServiceById } from "../db/repositories/services.js";
 import { getClienteById } from "../db/repositories/clientes.js";
@@ -26,36 +20,34 @@ import { formatearFechaCita } from "../notifications/recordatorios.js";
  * evento de Calendar y avisa al negocio).
  */
 export async function clienteRoutes(app: FastifyInstance) {
-  /** Código para que el cliente nos escriba y así probar que el número es suyo. */
+  /**
+   * Quién es el que acaba de entrar con Google.
+   *
+   * El enlace con su historial va por CORREO, que es el dato que Google ya
+   * verificó: si hay un cliente con ese mismo correo en la ficha, se ata sola
+   * la cuenta. Antes esto pedía un código por WhatsApp; se quitó porque le
+   * ponía un trámite a alguien que solo quiere ver sus citas, y para un
+   * cliente nuevo no tenía nada que enlazar.
+   *
+   * Sin coincidencia no se inventa nada: la cuenta queda sin historial hasta
+   * que reserve estando dentro (ahí se ata sola) o el staff le ponga el
+   * correo en su ficha.
+   */
   app.post("/cliente/vinculo", async (request: FastifyRequest, reply: FastifyReply) => {
-    const { authUserId } = await requireCliente(request.headers.authorization);
+    const { authUserId, email } = await requireCliente(request.headers.authorization);
 
     const yaVinculado = await clienteVinculado(authUserId);
     if (yaVinculado) {
       return reply.send({ vinculado: true, telefono: yaVinculado.telefono, nombre: yaVinculado.nombre });
     }
 
-    const codigo = await crearCodigoVinculo(authUserId);
-    return reply.send({
-      vinculado: false,
-      codigo,
-      // Link listo para abrir WhatsApp con el mensaje escrito: en el celular
-      // es un toque, y evita que el código se copie mal a mano.
-      // Al número del BOT, no al de avisos internos: es el que tiene el
-      // webhook conectado y puede leer este mensaje.
-      wa_url: `https://wa.me/${BOT_WHATSAPP_NUMERO}?text=${encodeURIComponent(`${FRASE_VINCULO} ${codigo}`)}`,
-    });
-  });
+    const porEmail = email ? await vincularPorEmail({ authUserId, email }) : null;
+    if (porEmail) {
+      logger.info({ authUserId }, "Cuenta de cliente enlazada por correo");
+      return reply.send({ vinculado: true, telefono: porEmail.telefono, nombre: porEmail.nombre });
+    }
 
-  /** ¿Ya quedó vinculada? La web lo consulta tras mandar el WhatsApp. */
-  app.get("/cliente/vinculo", async (request: FastifyRequest, reply: FastifyReply) => {
-    const { authUserId } = await requireCliente(request.headers.authorization);
-    const cliente = await clienteVinculado(authUserId);
-    return reply.send(
-      cliente
-        ? { vinculado: true, telefono: cliente.telefono, nombre: cliente.nombre }
-        : { vinculado: false },
-    );
+    return reply.send({ vinculado: false, email });
   });
 
   const cancelarSchema = z.object({ motivo: z.string().trim().max(300).optional() });

@@ -7,7 +7,6 @@ import { guardarMensaje } from "../db/repositories/mensajes.js";
 import { sendTextIfWindowOpen } from "../whatsapp/window.js";
 import { runAgent, FALLBACK_MESSAGE } from "./runner.js";
 import { handleImageMessage } from "./handleImageMessage.js";
-import { leerCodigoDeMensaje, canjearCodigoDesdeWhatsapp } from "../db/repositories/cuentaCliente.js";
 import type { InboundMessage } from "../whatsapp/parser.js";
 
 const AGENT_TIMEOUT_MS = 25_000;
@@ -51,44 +50,6 @@ export async function handleInboundMessage(message: InboundMessage): Promise<voi
 
   const cliente = await findOrCreateByPhone(message.from, message.contactName);
   const conversacion = await getOrCreateConversacionActiva(cliente.id);
-
-  // Vincular la cuenta del sitio va ANTES de cualquier otro corte: es una
-  // operación del sistema, no una charla con el bot. Que un humano esté
-  // atendiendo el chat (conversación escalada) no puede dejar al cliente sin
-  // poder entrar a su cuenta — que es justo lo que pasaba, en silencio.
-  //
-  // Se resuelve acá y no en el agente porque es una operación exacta (un
-  // código o no lo es); dejársela al modelo abriría la puerta a que "vincule"
-  // con un código inventado o mal leído.
-  const textoEntrante = extractText(message);
-  const codigoVinculo = textoEntrante ? leerCodigoDeMensaje(textoEntrante) : null;
-  if (textoEntrante && codigoVinculo) {
-    await guardarMensaje({
-      conversacionId: conversacion.id,
-      rol: "user",
-      contenido: textoEntrante,
-      waMessageId: message.id,
-    });
-    await marcarUltimoMensaje(conversacion.id);
-
-    const resultado = await canjearCodigoDesdeWhatsapp({
-      telefono: cliente.telefono,
-      codigo: codigoVinculo,
-      clienteId: cliente.id,
-    });
-    const texto = resultado.ok
-      ? "¡Listo! Tu cuenta quedó vinculada 🙌 Vuelve a la página y ya vas a ver tus citas y tus recompensas."
-      : resultado.razon === "cuenta_con_otro_numero"
-        ? "Esa cuenta ya está vinculada a otro número de WhatsApp. Entra con el correo que usaste la primera vez."
-        : "Ese código ya venció o no es válido. Genera uno nuevo desde la página y vuelve a enviarlo 🙏";
-    logger.info(
-      { telefono: cliente.telefono, ok: resultado.ok, razon: resultado.ok ? null : resultado.razon },
-      "Intento de vínculo de cuenta por WhatsApp",
-    );
-    await guardarMensaje({ conversacionId: conversacion.id, rol: "assistant", contenido: texto });
-    await sendTextIfWindowOpen(message.from, texto);
-    return;
-  }
 
   if (conversacion.estado === "escalada") {
     // Un humano ya está atendiendo esta conversación; no interviene el bot.
