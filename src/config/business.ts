@@ -12,6 +12,13 @@ export const SLOT_STEP_MINUTES = 60;
 
 export const BUSINESS_TIMEZONE = env.BUSINESS_TIMEZONE;
 
+// El número de WhatsApp del propio bot (al que le escribe el cliente para
+// reservar). NO es ESCALATION_PHONE — ese es el celular del dueño/staff para
+// avisos internos, un número completamente distinto. Mismo valor que
+// web/assets/tienda.js y booking.js: si cambia el número del negocio, se
+// toca en los dos repos.
+export const BOT_WHATSAPP_NUMERO = "51973298407";
+
 // Mismos 3 nombres que web/assets/booking.js — si se agrega o quita un
 // barbero, hay que tocar los dos lados (no hay tabla `barberos` todavía).
 export const BARBEROS = ["Cieza", "Nilton", "Brayan"] as const;

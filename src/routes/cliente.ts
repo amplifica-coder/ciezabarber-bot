@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { env } from "../config/env.js";
+import { BOT_WHATSAPP_NUMERO } from "../config/business.js";
 import { logger } from "../lib/logger.js";
 import { requireCliente } from "../lib/clienteAuth.js";
 import {
@@ -40,7 +41,9 @@ export async function clienteRoutes(app: FastifyInstance) {
       codigo,
       // Link listo para abrir WhatsApp con el mensaje escrito: en el celular
       // es un toque, y evita que el código se copie mal a mano.
-      wa_url: `https://wa.me/${env.ESCALATION_PHONE}?text=${encodeURIComponent(`${FRASE_VINCULO} ${codigo}`)}`,
+      // Al número del BOT, no al de avisos internos: es el que tiene el
+      // webhook conectado y puede leer este mensaje.
+      wa_url: `https://wa.me/${BOT_WHATSAPP_NUMERO}?text=${encodeURIComponent(`${FRASE_VINCULO} ${codigo}`)}`,
     });
   });
 
