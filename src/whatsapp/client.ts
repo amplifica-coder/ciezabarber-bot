@@ -32,7 +32,7 @@ async function callGraphApi(body: Record<string, unknown>): Promise<void> {
  * suscripción caída, y las dos dejan al bot mudo de formas distintas: sin
  * token no puede responder, sin suscripción no le llega nada que responder.
  */
-export async function diagnosticarLinea(): Promise<Record<string, unknown>> {
+export async function diagnosticarLinea(wabaIdManual?: string): Promise<Record<string, unknown>> {
   const resultado: Record<string, unknown> = {};
 
   const numeroRes = await fetch(
@@ -45,8 +45,20 @@ export async function diagnosticarLinea(): Promise<Record<string, unknown>> {
 
   // El WABA es quien tiene la suscripción de webhooks; el número solo cuelga
   // de él. Si `subscribed_apps` viene vacío, Meta no le entrega a nadie.
-  const wabaId = (numero.whatsapp_business_account as { id?: string } | undefined)?.id;
-  if (numeroRes.ok && wabaId) {
+  // Si el número no responde, preguntarle a la WABA separa las dos causas
+  // posibles: token muerto (falla también) o ID de número viejo en la config
+  // (la cuenta sí responde, y de paso devuelve cuál es el ID correcto).
+  const wabaId = (numero.whatsapp_business_account as { id?: string } | undefined)?.id ?? wabaIdManual;
+  if (wabaId) {
+    const numerosRes = await fetch(
+      `${GRAPH_BASE_URL}/${wabaId}/phone_numbers?fields=id,display_phone_number,verified_name`,
+      { headers: { Authorization: `Bearer ${env.WHATSAPP_ACCESS_TOKEN}` } },
+    );
+    const numeros = (await numerosRes.json()) as Record<string, unknown>;
+    resultado.idConfigurado = env.WHATSAPP_PHONE_NUMBER_ID;
+    resultado.numerosDeLaCuenta = numerosRes.ok ? numeros.data : { error: numeros.error };
+  }
+  if (wabaId) {
     const subsRes = await fetch(`${GRAPH_BASE_URL}/${wabaId}/subscribed_apps`, {
       headers: { Authorization: `Bearer ${env.WHATSAPP_ACCESS_TOKEN}` },
     });

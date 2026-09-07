@@ -92,9 +92,10 @@ export async function webhookRoutes(app: FastifyInstance) {
    * otra mitad del diagnóstico: /webhook/estado dice qué nos llega, esto dice
    * si Meta cree que tiene a quién entregarle.
    */
-  app.get("/webhook/linea", async (_request: FastifyRequest, reply: FastifyReply) => {
+  app.get("/webhook/linea", async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      return reply.send(await diagnosticarLinea());
+      const { waba } = request.query as { waba?: string };
+      return reply.send(await diagnosticarLinea(waba));
     } catch (err) {
       logger.error({ err }, "No se pudo diagnosticar la línea de WhatsApp");
       return reply.status(502).send({ error: "diagnostico_fallido" });
