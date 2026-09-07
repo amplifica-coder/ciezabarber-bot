@@ -24,6 +24,41 @@ async function callGraphApi(body: Record<string, unknown>): Promise<void> {
 }
 
 /**
+ * Le pregunta a Meta por el estado real de la línea: si el token sirve, a qué
+ * número corresponde y si la cuenta de WhatsApp Business (WABA) tiene alguna
+ * app suscrita para recibir webhooks.
+ *
+ * Existe porque desde afuera no se puede distinguir un token vencido de una
+ * suscripción caída, y las dos dejan al bot mudo de formas distintas: sin
+ * token no puede responder, sin suscripción no le llega nada que responder.
+ */
+export async function diagnosticarLinea(): Promise<Record<string, unknown>> {
+  const resultado: Record<string, unknown> = {};
+
+  const numeroRes = await fetch(
+    `${GRAPH_BASE_URL}/${env.WHATSAPP_PHONE_NUMBER_ID}?fields=display_phone_number,verified_name,quality_rating,platform_type,whatsapp_business_account`,
+    { headers: { Authorization: `Bearer ${env.WHATSAPP_ACCESS_TOKEN}` } },
+  );
+  const numero = (await numeroRes.json()) as Record<string, unknown>;
+  resultado.tokenValido = numeroRes.ok;
+  resultado.numero = numeroRes.ok ? numero : { error: numero.error };
+
+  // El WABA es quien tiene la suscripción de webhooks; el número solo cuelga
+  // de él. Si `subscribed_apps` viene vacío, Meta no le entrega a nadie.
+  const wabaId = (numero.whatsapp_business_account as { id?: string } | undefined)?.id;
+  if (numeroRes.ok && wabaId) {
+    const subsRes = await fetch(`${GRAPH_BASE_URL}/${wabaId}/subscribed_apps`, {
+      headers: { Authorization: `Bearer ${env.WHATSAPP_ACCESS_TOKEN}` },
+    });
+    const subs = (await subsRes.json()) as Record<string, unknown>;
+    resultado.wabaId = wabaId;
+    resultado.appsSuscritas = subsRes.ok ? subs.data : { error: subs.error };
+  }
+
+  return resultado;
+}
+
+/**
  * Los media IDs de WhatsApp no son URLs directas: primero hay que pedirle a
  * Graph la URL real (efímera, dura minutos) y recién ahí descargar los
  * bytes, ambos pasos con el mismo Bearer token.

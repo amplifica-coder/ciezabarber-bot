@@ -3,6 +3,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { env } from "../config/env.js";
 import { logger } from "../lib/logger.js";
 import { parseInboundMessages } from "../whatsapp/parser.js";
+import { diagnosticarLinea } from "../whatsapp/client.js";
 import { handleInboundMessage } from "../agent/handleMessage.js";
 import {
   registrarPost,
@@ -84,6 +85,20 @@ export async function webhookRoutes(app: FastifyInstance) {
    */
   app.get("/webhook/estado", async (_request: FastifyRequest, reply: FastifyReply) => {
     return reply.send(leerEstadoWebhook());
+  });
+
+  /**
+   * Le pregunta a Meta por el estado de la línea con el token del bot. Es la
+   * otra mitad del diagnóstico: /webhook/estado dice qué nos llega, esto dice
+   * si Meta cree que tiene a quién entregarle.
+   */
+  app.get("/webhook/linea", async (_request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      return reply.send(await diagnosticarLinea());
+    } catch (err) {
+      logger.error({ err }, "No se pudo diagnosticar la línea de WhatsApp");
+      return reply.status(502).send({ error: "diagnostico_fallido" });
+    }
   });
 
   app.post("/webhook", async (request: FastifyRequest, reply: FastifyReply) => {
