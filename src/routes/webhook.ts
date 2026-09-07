@@ -4,6 +4,13 @@ import { env } from "../config/env.js";
 import { logger } from "../lib/logger.js";
 import { parseInboundMessages } from "../whatsapp/parser.js";
 import { handleInboundMessage } from "../agent/handleMessage.js";
+import {
+  registrarPost,
+  registrarFirmaInvalida,
+  registrarMensaje,
+  registrarVerificacion,
+  leerEstadoWebhook,
+} from "../lib/webhookEstado.js";
 
 // Fase 1: dedup en memoria (suficiente para una sola instancia). Cuando
 // pasemos a persistencia real (Fase 2, Supabase), esto debe respaldarse en
@@ -44,6 +51,7 @@ async function processWebhookAsync(body: unknown): Promise<void> {
       continue;
     }
     try {
+      registrarMensaje();
       await handleInboundMessage(message);
     } catch (err) {
       logger.error({ err, messageId: message.id }, "Fallo manejando el mensaje entrante");
@@ -59,20 +67,38 @@ export async function webhookRoutes(app: FastifyInstance) {
     const challenge = query["hub.challenge"];
 
     if (mode === "subscribe" && token === env.WHATSAPP_VERIFY_TOKEN && challenge) {
+      registrarVerificacion(true);
       logger.info("Verificación de webhook de Meta exitosa");
       return reply.status(200).send(challenge);
     }
 
+    registrarVerificacion(false);
     logger.warn({ mode }, "Verificación de webhook rechazada: token o modo inválido");
     return reply.status(403).send("Forbidden");
   });
 
+  /**
+   * Qué le está llegando al webhook, sin datos de nadie: solo conteos y
+   * marcas de tiempo. Es lo que permite decir "Meta no está entregando" o
+   * "entrega y la firma no valida" sin adivinar.
+   */
+  app.get("/webhook/estado", async (_request: FastifyRequest, reply: FastifyReply) => {
+    return reply.send(leerEstadoWebhook());
+  });
+
   app.post("/webhook", async (request: FastifyRequest, reply: FastifyReply) => {
+    registrarPost();
     const signature = request.headers["x-hub-signature-256"] as string | undefined;
     const rawBody = request.rawBody;
 
     if (!rawBody || !verifySignature(rawBody, signature)) {
-      logger.warn("Firma de webhook inválida o ausente");
+      registrarFirmaInvalida();
+      // Con detalle: una firma que no valida y un webhook que no llega se ven
+      // idénticos desde afuera, y hay que poder distinguirlos.
+      logger.warn(
+        { tieneFirma: !!signature, bytes: rawBody?.length ?? 0 },
+        "Firma de webhook inválida o ausente",
+      );
       return reply.status(401).send({ error: "invalid_signature" });
     }
 
