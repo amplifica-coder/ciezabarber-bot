@@ -36,7 +36,7 @@ export async function diagnosticarLinea(wabaIdManual?: string): Promise<Record<s
   const resultado: Record<string, unknown> = {};
 
   const numeroRes = await fetch(
-    `${GRAPH_BASE_URL}/${env.WHATSAPP_PHONE_NUMBER_ID}?fields=display_phone_number,verified_name,quality_rating,platform_type,whatsapp_business_account`,
+    `${GRAPH_BASE_URL}/${env.WHATSAPP_PHONE_NUMBER_ID}?fields=display_phone_number,verified_name,quality_rating,platform_type`,
     { headers: { Authorization: `Bearer ${env.WHATSAPP_ACCESS_TOKEN}` } },
   );
   const numero = (await numeroRes.json()) as Record<string, unknown>;
@@ -48,7 +48,7 @@ export async function diagnosticarLinea(wabaIdManual?: string): Promise<Record<s
   // Si el número no responde, preguntarle a la WABA separa las dos causas
   // posibles: token muerto (falla también) o ID de número viejo en la config
   // (la cuenta sí responde, y de paso devuelve cuál es el ID correcto).
-  const wabaId = (numero.whatsapp_business_account as { id?: string } | undefined)?.id ?? wabaIdManual;
+  const wabaId = wabaIdManual;
   if (wabaId) {
     const numerosRes = await fetch(
       `${GRAPH_BASE_URL}/${wabaId}/phone_numbers?fields=id,display_phone_number,verified_name`,
