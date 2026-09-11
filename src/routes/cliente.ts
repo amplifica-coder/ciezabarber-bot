@@ -3,7 +3,14 @@ import { z } from "zod";
 import { env } from "../config/env.js";
 import { logger } from "../lib/logger.js";
 import { requireCliente } from "../lib/clienteAuth.js";
-import { clienteVinculado, vincularPorEmail, acreditarSaldo } from "../db/repositories/cuentaCliente.js";
+import {
+  clienteVinculado,
+  vincularPorEmail,
+  acreditarSaldo,
+  crearCodigoVinculo,
+  FRASE_VINCULO,
+} from "../db/repositories/cuentaCliente.js";
+import { BOT_WHATSAPP_NUMERO } from "../config/business.js";
 import { cancelarCita, getCitaPorId } from "../db/repositories/citas.js";
 import { getServiceById } from "../db/repositories/services.js";
 import { getClienteById } from "../db/repositories/clientes.js";
@@ -23,15 +30,12 @@ export async function clienteRoutes(app: FastifyInstance) {
   /**
    * Quién es el que acaba de entrar con Google.
    *
-   * El enlace con su historial va por CORREO, que es el dato que Google ya
-   * verificó: si hay un cliente con ese mismo correo en la ficha, se ata sola
-   * la cuenta. Antes esto pedía un código por WhatsApp; se quitó porque le
-   * ponía un trámite a alguien que solo quiere ver sus citas, y para un
-   * cliente nuevo no tenía nada que enlazar.
+   * Nunca bloquea: al perfil se entra solo con Google, y la respuesta dice
+   * si además hay una ficha de cliente detrás. Si no la hay, el perfil se
+   * muestra igual (vacío) y desde adentro se ofrece verificar el WhatsApp.
    *
-   * Sin coincidencia no se inventa nada: la cuenta queda sin historial hasta
-   * que reserve estando dentro (ahí se ata sola) o el staff le ponga el
-   * correo en su ficha.
+   * El enlace automático va por CORREO, que es el dato que Google ya
+   * verificó: si un cliente tiene ese mismo correo en su ficha, se ata sola.
    */
   app.post("/cliente/vinculo", async (request: FastifyRequest, reply: FastifyReply) => {
     const { authUserId, email } = await requireCliente(request.headers.authorization);
@@ -48,6 +52,33 @@ export async function clienteRoutes(app: FastifyInstance) {
     }
 
     return reply.send({ vinculado: false, email });
+  });
+
+  /**
+   * Código para verificar el WhatsApp desde el perfil. Es opcional y sirve
+   * para dos cosas: traerle el historial de citas que hizo por WhatsApp, y
+   * habilitar que le avisemos por ahí.
+   *
+   * El cliente NOS escribe (no al revés): el mensaje llega desde su número,
+   * que es la prueba, y de paso abre la ventana de 24h de Meta sin gastar
+   * una plantilla.
+   */
+  app.post("/cliente/vinculo/whatsapp", async (request: FastifyRequest, reply: FastifyReply) => {
+    const { authUserId } = await requireCliente(request.headers.authorization);
+
+    const yaVinculado = await clienteVinculado(authUserId);
+    if (yaVinculado) {
+      return reply.send({ vinculado: true, telefono: yaVinculado.telefono });
+    }
+
+    const codigo = await crearCodigoVinculo(authUserId);
+    return reply.send({
+      vinculado: false,
+      codigo,
+      // Al número del BOT, no al de avisos internos: es el que tiene el
+      // webhook conectado y puede leer este mensaje.
+      wa_url: `https://wa.me/${BOT_WHATSAPP_NUMERO}?text=${encodeURIComponent(`${FRASE_VINCULO} ${codigo}`)}`,
+    });
   });
 
   const cancelarSchema = z.object({ motivo: z.string().trim().max(300).optional() });
