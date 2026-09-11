@@ -46,7 +46,8 @@ export async function findOrCreateByPhone(telefono: string, nombre?: string): Pr
 }
 
 export async function guardarEmailCliente(clienteId: string, email: string): Promise<void> {
-  const { error } = await supabase.from("clientes").update({ email }).eq("id", clienteId);
+  // En minúsculas, igual que se busca al entrar con Google.
+  const { error } = await supabase.from("clientes").update({ email: email.toLowerCase() }).eq("id", clienteId);
   if (error) throw error;
 }
 

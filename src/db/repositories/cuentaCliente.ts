@@ -137,7 +137,10 @@ export async function vincularPorEmail(params: {
   const { data, error } = await supabase
     .from("clientes")
     .select("id, telefono, nombre, auth_user_id")
-    .ilike("email", params.email)
+    // `eq` en minúsculas y NO `ilike`: en ilike el guion bajo y el % son
+    // comodines, así que "ana_b@gmail.com" coincidía también con
+    // "anaxb@gmail.com" — y eso ataba la cuenta al historial de OTRA persona.
+    .eq("email", params.email.toLowerCase())
     .limit(1)
     .maybeSingle();
   if (error) throw error;
@@ -188,7 +191,7 @@ export async function vincularSiFichaNueva(params: {
 
   await supabase
     .from("clientes")
-    .update({ auth_user_id: params.authUserId, ...(params.email ? { email: params.email } : {}) })
+    .update({ auth_user_id: params.authUserId, ...(params.email ? { email: params.email.toLowerCase() } : {}) })
     .eq("id", params.clienteId);
 }
 

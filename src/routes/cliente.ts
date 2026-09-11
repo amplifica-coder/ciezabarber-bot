@@ -45,7 +45,17 @@ export async function clienteRoutes(app: FastifyInstance) {
       return reply.send({ vinculado: true, telefono: yaVinculado.telefono, nombre: yaVinculado.nombre });
     }
 
-    const porEmail = email ? await vincularPorEmail({ authUserId, email }) : null;
+    // El enlace por correo es un extra: si falla, se entra igual al perfil
+    // sin ficha. Antes una columna faltante hacía reventar este endpoint con
+    // "internal_error" y NADIE podía entrar a su cuenta.
+    let porEmail: Awaited<ReturnType<typeof vincularPorEmail>> = null;
+    if (email) {
+      try {
+        porEmail = await vincularPorEmail({ authUserId, email });
+      } catch (err) {
+        logger.error({ err, authUserId }, "No se pudo buscar la ficha por correo; se entra al perfil sin ella");
+      }
+    }
     if (porEmail) {
       logger.info({ authUserId }, "Cuenta de cliente enlazada por correo");
       return reply.send({ vinculado: true, telefono: porEmail.telefono, nombre: porEmail.nombre });
