@@ -64,6 +64,13 @@ vi.mock("../src/db/repositories/services.js", () => ({
   ]),
 }));
 
+vi.mock("../src/db/repositories/productos.js", () => ({
+  listActiveProducts: vi.fn().mockResolvedValue([
+    { id: "p1", name: "Rough MUK Crema Moldeadora", price: 110, description: "Brillo y fijación naturales.", linea: "Rough", stock: 4 },
+    { id: "p2", name: "Slick MUK Gomina", price: 110, description: "Acabado muy brillante.", linea: "Slick", stock: 0 },
+  ]),
+}));
+
 vi.mock("../src/db/repositories/plantillasMedia.js", () => ({
   listActivePlantillas: vi.fn().mockResolvedValue([
     {
@@ -109,6 +116,28 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("914851374");
     expect(prompt).toContain("PAGO POR ADELANTADO");
     expect(prompt).toContain("pendiente_pago");
+  });
+
+  /**
+   * El bot le respondía a un cliente que "no manejamos venta de productos,
+   * solo servicios" mientras la web le vendía esa misma crema. El catálogo
+   * de la tienda tiene que estar en el prompt, no solo en una tool.
+   */
+  it("incluye la tienda MUK con sus precios", async () => {
+    const prompt = await buildSystemPrompt();
+    expect(prompt).toContain("TIENDA MUK");
+    expect(prompt).toContain("Rough MUK Crema Moldeadora");
+    expect(prompt).toContain("S/ 110");
+  });
+
+  it("no ofrece lo que está agotado", async () => {
+    const prompt = await buildSystemPrompt();
+    expect(prompt).not.toContain("Slick MUK Gomina");
+  });
+
+  it("le prohíbe explícitamente negar que se venden productos", async () => {
+    const prompt = await buildSystemPrompt();
+    expect(prompt).toContain("Nunca digas que no vendemos productos");
   });
 
   it("incluye la fecha de hoy en formato ISO, para que Claude no la invente", async () => {

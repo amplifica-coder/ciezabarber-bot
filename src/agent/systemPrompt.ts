@@ -1,6 +1,7 @@
 import { listActiveServices, type Service } from "../db/repositories/services.js";
 import { calcularAdelanto, formatearMonto } from "../lib/deposito.js";
 import { listActivePlantillas, type PlantillaMedia } from "../db/repositories/plantillasMedia.js";
+import { listActiveProducts, type Producto } from "../db/repositories/productos.js";
 import {
   BUSINESS_TIMEZONE,
   BARBEROS,
@@ -54,6 +55,19 @@ function formatCatalog(services: Service[]): string {
     .join("\n\n");
 }
 
+/**
+ * La tienda en el prompt y no en una tool: el bot NEGABA que el negocio
+ * vendiera productos, así que no bastaba con darle dónde consultarlos —
+ * tenía que saber de entrada que existen.
+ */
+function formatTienda(productos: Producto[]): string {
+  const disponibles = productos.filter((p) => p.stock > 0);
+  if (disponibles.length === 0) return "(sin stock disponible por ahora)";
+  return disponibles
+    .map((p) => `  - ${p.name} — S/ ${p.price}${p.linea ? ` (línea ${p.linea})` : ""}: ${p.description}`)
+    .join("\n");
+}
+
 function formatMultimedia(plantillas: PlantillaMedia[]): string {
   if (plantillas.length === 0) return "(ninguna cargada todavía)";
   return plantillas
@@ -62,13 +76,19 @@ function formatMultimedia(plantillas: PlantillaMedia[]): string {
 }
 
 export async function buildSystemPrompt(): Promise<string> {
-  const [services, plantillas] = await Promise.all([listActiveServices(), listActivePlantillas()]);
+  const [services, plantillas, productos] = await Promise.all([
+    listActiveServices(),
+    listActivePlantillas(),
+    listActiveProducts(),
+  ]);
   const catalog = formatCatalog(services);
+  const tienda = formatTienda(productos);
   const multimedia = formatMultimedia(plantillas);
   const fechaHoy = formatearFechaHoy();
 
   return `Eres el recepcionista virtual de Cieza Barber Studio, una barbería en ${ADDRESS}. Atiendes por WhatsApp a
-clientes que quieren agendar, consultar, reagendar o cancelar una cita.
+clientes que quieren agendar, consultar, reagendar o cancelar una cita, y también a los que quieren comprar
+productos de la tienda MUK.
 
 FECHA DE HOY
 ${fechaHoy}, hora de Lima. Usa siempre esta fecha (no la que "creas" que es) como punto de partida para calcular
@@ -88,6 +108,16 @@ ${CANCELLATION_POLICY}
 
 CATÁLOGO DE SERVICIOS ACTIVOS
 ${catalog}
+
+TIENDA MUK
+El negocio SÍ vende productos: es distribuidor autorizado de MUK Hair Perú. Esto está a la venta ahora mismo:
+${tienda}
+- Nunca digas que no vendemos productos ni que solo hacemos servicios: es falso y se pierde la venta.
+- Si preguntan por uno que no está en esa lista, di que ese no lo manejamos y ofrece los que sí hay.
+- Cómo se compra: se paga por Yape al ${DEPOSITO_YAPE_NUMERO} y se manda la captura por acá. La entrega se
+  coordina contigo: retiro en el local o delivery en Lima.
+- Si el cliente escribe desde la web con su pedido ya armado (te llega la lista y el total), confírmale el total,
+  pásale el número de Yape y pídele la captura. No recalcules precios: usa los de la lista de arriba.
 
 BARBEROS
 ${BARBEROS.map((b) => `  - ${b}: descansa los ${BARBERO_DESCANSO[b]}`).join("\n")}
@@ -157,6 +187,6 @@ LÍMITES IMPORTANTES
   en resolverlo tú primero.
 - Si una tool falla o da un resultado inesperado que no sabes cómo manejar: usa escalar_a_humano en vez de
   improvisar una respuesta.
-- Si el mensaje no tiene nada que ver con Cieza Barber o sus servicios: redirige con amabilidad hacia en qué
-  puedes ayudar (agendar, consultar o cancelar una cita), sin sonar cortante.`;
+- Si el mensaje no tiene nada que ver con Cieza Barber, sus servicios o su tienda: redirige con amabilidad hacia
+  en qué puedes ayudar (agendar, consultar o cancelar una cita, o vender un producto), sin sonar cortante.`;
 }
