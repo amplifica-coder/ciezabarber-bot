@@ -5,6 +5,7 @@ import { logger } from "../lib/logger.js";
 import { isRateLimited } from "../lib/rateLimit.js";
 import { requireCliente } from "../lib/clienteAuth.js";
 import { vincularSiFichaNueva } from "../db/repositories/cuentaCliente.js";
+import { procesarPedidoWeb, MIMES_PEDIDO } from "../lib/pedidoService.js";
 import { consultarDisponibilidadReal } from "../lib/disponibilidadService.js";
 import { getServiceById } from "../db/repositories/services.js";
 import { findOrCreateByPhone } from "../db/repositories/clientes.js";
@@ -157,6 +158,49 @@ export async function publicRoutes(app: FastifyInstance) {
         : {}),
     });
   });
+
+  const pedidoBodySchema = z.object({
+    items: z
+      .array(z.object({ producto_id: z.string().uuid(), cantidad: z.number().int().positive().max(20) }))
+      .min(1)
+      .max(20),
+    nombre: z.string().trim().max(120).optional(),
+    telefono: z.string().trim().max(20).optional(),
+    mime_type: z.enum(MIMES_PEDIDO as [string, ...string[]]),
+    imagen_base64: z.string().min(100),
+  });
+
+  /**
+   * Compra de productos desde la tienda de la web, pagada por Yape.
+   *
+   * No lleva token: no hay nada que proteger todavía (a diferencia de una
+   * reserva, que ya existe). Lo que sí se protege es el monto — se calcula
+   * en el servidor con los precios de la BD.
+   */
+  app.post(
+    "/public/pedidos",
+    { bodyLimit: 8 * 1024 * 1024 },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      if (isRateLimited(`ped:${request.ip}`, env.PUBLIC_RATE_LIMIT_MAX_PER_MINUTE)) {
+        return reply.status(429).send({ error: "demasiadas_solicitudes" });
+      }
+      const parsed = pedidoBodySchema.safeParse(request.body);
+      if (!parsed.success) return reply.status(400).send({ error: "invalid_body", detail: parsed.error.issues });
+
+      const resultado = await procesarPedidoWeb({
+        items: parsed.data.items,
+        ...(parsed.data.nombre ? { nombre: parsed.data.nombre } : {}),
+        ...(parsed.data.telefono ? { telefono: parsed.data.telefono } : {}),
+        buffer: Buffer.from(parsed.data.imagen_base64, "base64"),
+        mimeType: parsed.data.mime_type,
+      });
+
+      if (!resultado.ok) {
+        return reply.status(409).send({ error: resultado.razon, mensaje: resultado.detalle });
+      }
+      return reply.send({ estado: resultado.estado, total: resultado.total, resumen: resultado.resumen });
+    },
+  );
 
   const comprobanteBodySchema = z.object({
     upload_token: z.string().uuid(),
