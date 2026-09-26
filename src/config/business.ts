@@ -50,3 +50,6 @@ export const DEPOSITO_PORCENTAJE = 1;
 // (5 + 5) se suelta el horario.
 export const DEPOSITO_AVISO_MINUTOS = 5;
 export const DEPOSITO_EXPIRA_MINUTOS = 10;
+
+/** Cuántas personas pueden venir de acompañante en una misma reserva. */
+export const MAX_ACOMPANANTES = 1;

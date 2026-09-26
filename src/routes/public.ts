@@ -18,6 +18,7 @@ import {
   BARBEROS,
   DEPOSITO_YAPE_NUMERO,
   DEPOSITO_EXPIRA_MINUTOS,
+  MAX_ACOMPANANTES,
 } from "../config/business.js";
 
 const FECHA_REGEX = /^\d{4}-\d{2}-\d{2}$/;
@@ -40,6 +41,8 @@ const reservaBodySchema = z.object({
   telefono: z.string().trim().min(6),
   primera_visita: z.boolean().nullable().optional(),
   comentario: z.string().trim().max(1000).optional(),
+  // Tope de la casa: se puede venir con UN acompañante, no más.
+  acompanantes: z.number().int().min(0).max(MAX_ACOMPANANTES).optional(),
   barbero: z.enum(BARBEROS).optional(),
 });
 
@@ -97,6 +100,7 @@ export async function publicRoutes(app: FastifyInstance) {
     const notasPartes: string[] = [];
     if (body.primera_visita === true) notasPartes.push("Primera visita: sí");
     if (body.primera_visita === false) notasPartes.push("Primera visita: no");
+    if (body.acompanantes) notasPartes.push("Viene con 1 acompañante");
     if (body.comentario) notasPartes.push(body.comentario);
     const notas = notasPartes.length > 0 ? notasPartes.join(" — ") : undefined;
 

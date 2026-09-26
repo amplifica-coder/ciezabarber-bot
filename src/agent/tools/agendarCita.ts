@@ -10,6 +10,7 @@ import {
   BARBEROS,
   DEPOSITO_YAPE_NUMERO,
   DEPOSITO_EXPIRA_MINUTOS,
+  MAX_ACOMPANANTES,
 } from "../../config/business.js";
 
 const FECHA_REGEX = /^\d{4}-\d{2}-\d{2}$/;
@@ -23,6 +24,7 @@ const inputSchema = z.object({
   correo_cliente: z.string().email().optional(),
   barbero: z.enum(BARBEROS).optional(),
   notas: z.string().max(500).optional(),
+  acompanantes: z.number().int().min(0).optional(),
 });
 
 export const agendarCitaTool: AgentTool<z.infer<typeof inputSchema>> = {
@@ -36,7 +38,9 @@ export const agendarCitaTool: AgentTool<z.infer<typeof inputSchema>> = {
     "quiere la invitación en su Google Calendar), pásalo aquí; nunca lo pidas como requisito para agendar. " +
     "barbero es opcional: solo si el cliente pidió uno en particular (Cieza, Nilton o Brayan) — pásalo siempre " +
     "que lo mencione, para que quede registrado. notas es opcional: cualquier otro dato para el staff que no " +
-    "encaje en los demás campos — el cliente nunca ve este texto, es interno.",
+    "encaje en los demás campos — el cliente nunca ve este texto, es interno. acompanantes: cuántas personas " +
+    "vienen con el cliente sin reservar aparte (0 o 1). Solo se permite 1 acompañante por reserva: si el cliente " +
+    "dice que viene con más gente, NO agendes con ese número — explícale el límite primero.",
   inputSchema,
   jsonSchema: {
     type: "object",
@@ -48,10 +52,21 @@ export const agendarCitaTool: AgentTool<z.infer<typeof inputSchema>> = {
       correo_cliente: { type: "string", description: "Opcional, solo si el cliente lo ofrece voluntariamente" },
       barbero: { type: "string", enum: [...BARBEROS], description: "Solo si el cliente pidió uno en particular" },
       notas: { type: "string", description: "Nota interna para el staff. El cliente no la ve." },
+      acompanantes: { type: "integer", minimum: 0, description: "Personas que lo acompañan. Máximo 1." },
     },
     required: ["servicio_id", "fecha", "hora"],
   },
   handler: async (input, ctx) => {
+    if ((input.acompanantes ?? 0) > MAX_ACOMPANANTES) {
+      return {
+        ok: false,
+        error: "maximo_un_acompanante",
+        instrucciones_para_ti:
+          "Solo se permite 1 acompañante por reserva. Díselo al cliente con amabilidad; si vienen más personas " +
+          "y todas quieren atenderse, cada una reserva su propio horario. No agendes hasta que confirme.",
+      };
+    }
+
     const servicio = await getServiceById(input.servicio_id);
     if (!servicio || !servicio.duration_minutes) {
       return { ok: false, error: "servicio_no_encontrado" };
@@ -69,6 +84,12 @@ export const agendarCitaTool: AgentTool<z.infer<typeof inputSchema>> = {
     // algo que el modelo elija ni que el cliente proponga.
     const adelanto = calcularAdelanto(servicio);
 
+    // Sin columna propia: el acompañante viaja en las notas, igual que
+    // "primera visita" en la reserva web, y el staff lo ve en Reservas.
+    const notasFinales = [input.acompanantes ? "Viene con 1 acompañante" : null, input.notas]
+      .filter(Boolean)
+      .join(" — ");
+
     const result = await crearCita({
       clienteId: cliente.id,
       servicioId: servicio.id,
@@ -76,7 +97,7 @@ export const agendarCitaTool: AgentTool<z.infer<typeof inputSchema>> = {
       finUtc,
       creadaPor: "bot",
       depositoEsperado: adelanto,
-      ...(input.notas ? { notas: input.notas } : {}),
+      ...(notasFinales ? { notas: notasFinales } : {}),
       ...(input.barbero ? { barbero: input.barbero } : {}),
     });
 
