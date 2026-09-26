@@ -14,7 +14,7 @@ import {
   guardarAtencionNotas,
   reagendarCitaDesdePanel,
   crearCita,
-  registrarServicioAtendido,
+  registrarServiciosAtendidos,
 } from "../db/repositories/citas.js";
 import { getServiceById } from "../db/repositories/services.js";
 import { findOrCreateByPhone } from "../db/repositories/clientes.js";
@@ -286,7 +286,9 @@ export async function adminRoutes(app: FastifyInstance) {
   });
 
   const servicioAtendidoSchema = z.object({
-    servicio_id: z.string().min(1),
+    // `servicio_id` (uno solo) se mantiene por compatibilidad con paneles ya abiertos.
+    servicio_id: z.string().min(1).optional(),
+    servicio_ids: z.array(z.string().min(1)).min(1).max(10).optional(),
     barbero: z.enum(BARBEROS),
     metodo_pago: z.enum(["yape_plin", "tarjeta", "efectivo"]),
     fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -318,40 +320,47 @@ export async function adminRoutes(app: FastifyInstance) {
       return reply.status(403).send({ error: "solo_tus_servicios" });
     }
 
-    const servicio = await getServiceById(body.servicio_id);
-    if (!servicio) return reply.status(400).send({ error: "servicio_no_encontrado" });
-    // Un servicio cargado desde el panel puede no tener los minutos puestos.
-    // Decirlo con su nombre evita el clásico "no se pudo" sin pistas.
-    if (!servicio.duration_minutes) {
-      return reply.status(400).send({
-        error: "servicio_sin_duracion",
-        mensaje: `"${servicio.name}" no tiene duración en minutos: edítalo en Servicios y guarda la duración.`,
-      });
-    }
+    const servicioIds = body.servicio_ids ?? (body.servicio_id ? [body.servicio_id] : []);
+    if (servicioIds.length === 0) return reply.status(400).send({ error: "invalid_body" });
 
     const telefono = body.telefono_cliente?.trim() || "mostrador";
     const nombre = body.nombre_cliente?.trim() || "Cliente de mostrador";
     const cliente = await findOrCreateByPhone(telefono, nombre);
 
     const inicioUtc = timeStringToUtcDate(body.fecha, body.hora, BUSINESS_TIMEZONE);
-    const finUtc = new Date(inicioUtc.getTime() + servicio.duration_minutes * 60_000);
 
-    const resultado = await registrarServicioAtendido({
+    const resultado = await registrarServiciosAtendidos({
       clienteId: cliente.id,
-      servicioId: servicio.id,
+      servicioIds,
       inicioUtc,
-      finUtc,
       barbero: body.barbero,
       metodoPago: body.metodo_pago,
       ...(body.notas ? { notas: body.notas } : {}),
     });
-    if (!resultado.ok) return reply.status(409).send({ error: resultado.reason });
+    if (!resultado.ok) {
+      if (resultado.reason === "servicio_no_encontrado") {
+        return reply.status(400).send({ error: "servicio_no_encontrado" });
+      }
+      // Un servicio cargado desde el panel puede no tener los minutos puestos.
+      // Decirlo con su nombre evita el clásico "no se pudo" sin pistas.
+      if (resultado.reason === "servicio_sin_duracion") {
+        const falla = resultado.servicioId ? await getServiceById(resultado.servicioId) : null;
+        return reply.status(400).send({
+          error: "servicio_sin_duracion",
+          mensaje: `"${falla?.name ?? "Un servicio"}" no tiene duración en minutos: edítalo en Servicios y guarda la duración.`,
+        });
+      }
+      return reply.status(409).send({
+        error: "conflicto_horario",
+        mensaje: `${body.barbero} ya tiene otra cita que se cruza con ese tiempo. Cambia la hora de inicio o quita algún servicio.`,
+      });
+    }
 
     logger.info(
-      { citaId: resultado.cita.id, barbero: body.barbero, metodoPago: body.metodo_pago, por: user.rol },
+      { citas: resultado.citas.length, barbero: body.barbero, metodoPago: body.metodo_pago, por: user.rol },
       "Servicio atendido registrado desde Control",
     );
-    return reply.status(201).send({ cita: resultado.cita });
+    return reply.status(201).send({ cita: resultado.citas[0], citas: resultado.citas });
   });
 
   /**

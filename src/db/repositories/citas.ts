@@ -191,6 +191,8 @@ export async function registrarServicioAtendido(params: {
   barbero: string;
   metodoPago: NonNullable<Cita["metodo_pago"]>;
   notas?: string;
+  /** Agrupa los servicios de una misma visita (combo registrado junto). */
+  reservaId?: string;
 }): Promise<CrearCitaResult> {
   const { data, error } = await supabase
     .from("citas")
@@ -204,6 +206,7 @@ export async function registrarServicioAtendido(params: {
       barbero: params.barbero,
       estado: "completada",
       metodo_pago: params.metodoPago,
+      ...(params.reservaId ? { reserva_id: params.reservaId } : {}),
     })
     .select("*")
     .single();
@@ -213,6 +216,60 @@ export async function registrarServicioAtendido(params: {
     throw error;
   }
   return { ok: true, cita: data as Cita };
+}
+
+export type RegistrarServiciosResult =
+  | { ok: true; citas: Cita[] }
+  | { ok: false; reason: "conflicto_horario" | "servicio_no_encontrado" | "servicio_sin_duracion"; servicioId?: string };
+
+/**
+ * Varios servicios de una misma visita, uno tras otro desde `inicioUtc`: cada
+ * uno arranca donde termina el anterior, así el barbero queda bloqueado todo
+ * el tiempo real de la atención (el bot y las reservas web ven esas horas
+ * como ocupadas, porque una cita completada ocupa igual que una confirmada).
+ * Todo o nada: si un tramo choca con otra cita, se revierte lo ya insertado.
+ */
+export async function registrarServiciosAtendidos(params: {
+  clienteId: string;
+  servicioIds: string[];
+  inicioUtc: Date;
+  barbero: string;
+  metodoPago: NonNullable<Cita["metodo_pago"]>;
+  notas?: string;
+}): Promise<RegistrarServiciosResult> {
+  const reservaId = randomUUID();
+  const creadas: Cita[] = [];
+  let cursor = params.inicioUtc;
+
+  for (const servicioId of params.servicioIds) {
+    const servicio = await getServiceById(servicioId);
+    if (!servicio) {
+      for (const c of creadas) await borrarCitaRollback(c);
+      return { ok: false, reason: "servicio_no_encontrado", servicioId };
+    }
+    if (!servicio.duration_minutes) {
+      for (const c of creadas) await borrarCitaRollback(c);
+      return { ok: false, reason: "servicio_sin_duracion", servicioId };
+    }
+    const finUtc = new Date(cursor.getTime() + servicio.duration_minutes * 60_000);
+    const r = await registrarServicioAtendido({
+      clienteId: params.clienteId,
+      servicioId,
+      inicioUtc: cursor,
+      finUtc,
+      barbero: params.barbero,
+      metodoPago: params.metodoPago,
+      reservaId,
+      ...(params.notas ? { notas: params.notas } : {}),
+    });
+    if (!r.ok) {
+      for (const c of creadas) await borrarCitaRollback(c);
+      return { ok: false, reason: "conflicto_horario", servicioId };
+    }
+    creadas.push(r.cita);
+    cursor = finUtc;
+  }
+  return { ok: true, citas: creadas };
 }
 
 /**
