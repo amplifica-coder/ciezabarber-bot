@@ -1,0 +1,32 @@
+# Monitor de la base de datos. GitHub manda un correo cuando este workflow
+# FALLA, así que una caída de Supabase avisa en minutos en vez de horas
+# (el 27-sep-2026 la API estuvo ~6 h caída sin que nadie se enterara).
+#
+# Nota: el cron de GitHub es "mejor esfuerzo" — puede atrasarse unos minutos
+# — y en repos públicos se desactiva solo tras 60 días sin actividad en el
+# repo (hay que reactivarlo desde la pestaña Actions).
+name: Monitor base de datos
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Consultar /health/db
+        run: |
+          # Tres intentos espaciados: un solo parpadeo de red no debe despertar a nadie.
+          for i in 1 2 3; do
+            code=$(curl -s -o /tmp/resp.json -w "%{http_code}" --max-time 20 https://bot.ciezabarber.com/health/db || true)
+            echo "intento $i -> HTTP $code"
+            cat /tmp/resp.json 2>/dev/null; echo
+            if [ "$code" = "200" ]; then exit 0; fi
+            sleep 20
+          done
+          echo "::error::La base de datos (o el bot) no responde: /health/db devolvió $code tras 3 intentos."
+          echo "Reinicia en Supabase: Project Settings > General > Restart project."
+          exit 1
