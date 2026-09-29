@@ -90,21 +90,39 @@ export async function handleInboundMessage(message: InboundMessage): Promise<voi
     return;
   }
 
-  if (conversacion.estado === "escalada") {
-    // Un humano ya está atendiendo esta conversación; no interviene el bot.
-    logger.info({ conversacionId: conversacion.id }, "Conversación escalada, se ignora el mensaje del bot");
+  // Escalada: un humano ya está atendiendo. No corta acá arriba — antes lo
+  // hacía, y el mensaje del cliente ni siquiera quedaba guardado: el staff
+  // no lo veía en el panel a menos que revisara WhatsApp directo. Cada tipo
+  // de mensaje se sigue guardando (o, para la imagen, procesando) como
+  // siempre; lo único que se salta con la conversación escalada es que el
+  // bot le conteste.
+  const escalada = conversacion.estado === "escalada";
+
+  if (message.kind === "image") {
+    // Un comprobante de pago no puede esperar a que un humano note el chat:
+    // esto corre igual, escalada o no.
+    await handleImageMessage(message, cliente, conversacion);
     return;
   }
 
   if (message.kind === "audio") {
+    // El audio en sí se deja registrado aunque el bot no pueda escucharlo —
+    // antes ni esto quedaba, y en el panel no se veía que el cliente había
+    // mandado algo.
+    await guardarMensaje({
+      conversacionId: conversacion.id,
+      rol: "user",
+      contenido: "[Audio recibido]",
+      waMessageId: message.id,
+    });
+    await marcarUltimoMensaje(conversacion.id);
+    if (escalada) {
+      logger.info({ conversacionId: conversacion.id }, "Conversación escalada: audio guardado, no interviene el bot");
+      return;
+    }
     const texto = "Por ahora no puedo escuchar audios 🙏 ¿me lo escribes en un mensaje de texto?";
     await guardarMensaje({ conversacionId: conversacion.id, rol: "assistant", contenido: texto });
     await sendTextIfWindowOpen(message.from, texto);
-    return;
-  }
-
-  if (message.kind === "image") {
-    await handleImageMessage(message, cliente, conversacion);
     return;
   }
 
@@ -121,6 +139,11 @@ export async function handleInboundMessage(message: InboundMessage): Promise<voi
     waMessageId: message.id,
   });
   await marcarUltimoMensaje(conversacion.id);
+
+  if (escalada) {
+    logger.info({ conversacionId: conversacion.id }, "Conversación escalada: mensaje guardado, no interviene el bot");
+    return;
+  }
 
   let respuesta: string;
   try {

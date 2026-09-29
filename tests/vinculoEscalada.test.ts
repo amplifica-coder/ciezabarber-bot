@@ -20,14 +20,16 @@ vi.mock("../src/db/repositories/conversaciones.js", () => ({
   marcarUltimoMensaje: vi.fn(),
   escalarConversacion: vi.fn(),
 }));
-vi.mock("../src/db/repositories/mensajes.js", () => ({ guardarMensaje: vi.fn() }));
+const guardarMensajeMock = vi.fn();
+vi.mock("../src/db/repositories/mensajes.js", () => ({ guardarMensaje: (...a: unknown[]) => guardarMensajeMock(...a) }));
 
 const sendTextIfWindowOpenMock = vi.fn();
 vi.mock("../src/whatsapp/window.js", () => ({ sendTextIfWindowOpen: sendTextIfWindowOpenMock }));
 
 const runAgentMock = vi.fn();
 vi.mock("../src/agent/runner.js", () => ({ runAgent: runAgentMock, FALLBACK_MESSAGE: "fallback" }));
-vi.mock("../src/agent/handleImageMessage.js", () => ({ handleImageMessage: vi.fn() }));
+const handleImageMessageMock = vi.fn();
+vi.mock("../src/agent/handleImageMessage.js", () => ({ handleImageMessage: (...a: unknown[]) => handleImageMessageMock(...a) }));
 
 const canjearMock = vi.fn().mockResolvedValue({ ok: true });
 vi.mock("../src/db/repositories/cuentaCliente.js", () => ({
@@ -44,6 +46,8 @@ describe("vínculo de cuenta con la conversación escalada", () => {
     canjearMock.mockClear();
     sendTextIfWindowOpenMock.mockClear();
     runAgentMock.mockClear();
+    guardarMensajeMock.mockClear();
+    handleImageMessageMock.mockClear();
   });
 
   /**
@@ -64,6 +68,36 @@ describe("vínculo de cuenta con la conversación escalada", () => {
     await handleInboundMessage(mensaje("Hola, quiero una cita el viernes"));
     expect(canjearMock).not.toHaveBeenCalled();
     expect(runAgentMock).not.toHaveBeenCalled();
+    expect(sendTextIfWindowOpenMock).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Antes el corte por "escalada" pasaba ANTES de guardar nada: el mensaje
+   * del cliente ni siquiera quedaba en el historial, así que el staff no lo
+   * veía en el panel a menos que revisara WhatsApp directo. El bot se sigue
+   * callando, pero el mensaje tiene que quedar registrado igual.
+   */
+  it("guarda el mensaje del cliente aunque la conversación esté escalada", async () => {
+    await handleInboundMessage(mensaje("Hola, quiero una cita el viernes"));
+    expect(guardarMensajeMock).toHaveBeenCalledWith(
+      expect.objectContaining({ conversacionId: "conv1", rol: "user", contenido: "Hola, quiero una cita el viernes" }),
+    );
+  });
+
+  /**
+   * Un comprobante de pago no puede esperar a que un humano note el chat:
+   * la imagen se procesa igual aunque la conversación esté escalada.
+   */
+  it("procesa una imagen igual, escalada o no", async () => {
+    await handleInboundMessage({ kind: "image", from: "51987654321", id: "wa2", mediaId: "med1", mimeType: "image/jpeg" });
+    expect(handleImageMessageMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("guarda el audio del cliente aunque la conversación esté escalada, sin responder", async () => {
+    await handleInboundMessage({ kind: "audio", from: "51987654321", id: "wa3", mediaId: "aud1" });
+    expect(guardarMensajeMock).toHaveBeenCalledWith(
+      expect.objectContaining({ conversacionId: "conv1", rol: "user", contenido: "[Audio recibido]" }),
+    );
     expect(sendTextIfWindowOpenMock).not.toHaveBeenCalled();
   });
 });
