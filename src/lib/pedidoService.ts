@@ -3,6 +3,7 @@ import { logger } from "./logger.js";
 import { analizarComprobante } from "../agent/paymentProof.js";
 import { avisarStaff } from "../whatsapp/window.js";
 import { env } from "../config/env.js";
+import { extensionParaMime, MIMES_IMAGEN_ACEPTADOS } from "./mediaExt.js";
 
 export type ItemPedido = { producto_id: string; cantidad: number };
 
@@ -10,13 +11,7 @@ export type ResultadoPedido =
   | { ok: true; estado: "confirmado" | "en_revision"; total: number; resumen: string }
   | { ok: false; razon: "producto_no_disponible" | "sin_stock"; detalle: string };
 
-const EXTENSION_POR_MIME: Record<string, string> = {
-  "image/jpeg": "jpg",
-  "image/png": "png",
-  "image/webp": "webp",
-};
-
-export const MIMES_PEDIDO = Object.keys(EXTENSION_POR_MIME);
+export const MIMES_PEDIDO = MIMES_IMAGEN_ACEPTADOS;
 
 type ProductoVendible = { id: string; name: string; price: number; stock: number; active: boolean };
 
@@ -64,7 +59,7 @@ export async function procesarPedidoWeb(params: {
   const total = lineas.reduce((s, l) => s + l.subtotal, 0);
   const resumen = lineas.map((l) => `${l.cantidad} × ${l.producto.name}`).join(", ");
 
-  const extension = EXTENSION_POR_MIME[params.mimeType] ?? "jpg";
+  const extension = extensionParaMime(params.mimeType);
   const path = `pedidos/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${extension}`;
   const { error: uploadError } = await supabase.storage
     .from("comprobantes")

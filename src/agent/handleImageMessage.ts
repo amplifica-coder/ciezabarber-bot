@@ -1,5 +1,7 @@
 import { logger } from "../lib/logger.js";
+import { supabase } from "../db/client.js";
 import { descargarMedia } from "../whatsapp/client.js";
+import { extensionParaMime } from "../lib/mediaExt.js";
 import { sendTextIfWindowOpen } from "../whatsapp/window.js";
 import { guardarMensaje } from "../db/repositories/mensajes.js";
 import { escalarConversacion } from "../db/repositories/conversaciones.js";
@@ -23,6 +25,27 @@ const TEXTO_EN_REVISION =
   "en breve. Tranquilo, tu horario queda apartado mientras lo revisamos — te avisamos apenas quede confirmado.";
 
 /**
+ * Copia de la imagen en el bucket `comprobantes` (privado, staff-only) bajo
+ * `chat/<conversacion>/...`, separada de la carpeta por reserva que usa
+ * procesarComprobante — así el panel puede mostrarla en el hilo aunque la
+ * foto no termine siendo (o ni siquiera sea) un comprobante de pago.
+ * Best-effort: que falle esto no puede tumbar la conversación.
+ */
+async function guardarCopiaParaElPanel(
+  conversacionId: string,
+  buffer: Buffer,
+  mimeType: string,
+): Promise<string | null> {
+  const path = `chat/${conversacionId}/${Date.now()}.${extensionParaMime(mimeType)}`;
+  const { error } = await supabase.storage.from("comprobantes").upload(path, buffer, { contentType: mimeType });
+  if (error) {
+    logger.error({ err: error, conversacionId }, "No se pudo guardar la copia de la imagen para el panel");
+    return null;
+  }
+  return path;
+}
+
+/**
  * Flujo separado del loop conversacional normal (como el de audio): una
  * imagen no es un mensaje de texto que Claude deba interpretar con tools,
  * es un comprobante que se analiza una sola vez y de forma determinística.
@@ -35,11 +58,27 @@ export async function handleImageMessage(
   cliente: Cliente,
   conversacion: Conversacion,
 ): Promise<void> {
+  // Se descarga una sola vez: la copia para el panel y el análisis del
+  // comprobante (si aplica) comparten el mismo buffer, en vez de pedirle la
+  // imagen dos veces a la API de WhatsApp.
+  let buffer: Buffer | null = null;
+  let mimeType = message.mimeType;
+  let mediaPath: string | null = null;
+  try {
+    const descarga = await descargarMedia(message.mediaId);
+    buffer = descarga.buffer;
+    mimeType = descarga.mimeType;
+    mediaPath = await guardarCopiaParaElPanel(conversacion.id, buffer, mimeType);
+  } catch (err) {
+    logger.error({ err, conversacionId: conversacion.id }, "No se pudo descargar la imagen entrante de WhatsApp");
+  }
+
   await guardarMensaje({
     conversacionId: conversacion.id,
     rol: "user",
     contenido: "[Imagen recibida]",
     waMessageId: message.id,
+    ...(mediaPath ? { mediaUrl: mediaPath, mediaType: "image" } : {}),
   });
 
   const pendiente = await getReservaPendienteDeComprobante(cliente.id);
@@ -53,7 +92,7 @@ export async function handleImageMessage(
 
   let respuesta: string;
   try {
-    const { buffer, mimeType } = await descargarMedia(message.mediaId);
+    if (!buffer) throw new Error("no se pudo descargar la imagen");
     const resultado = await procesarComprobante({
       reservaId,
       depositoEsperado,

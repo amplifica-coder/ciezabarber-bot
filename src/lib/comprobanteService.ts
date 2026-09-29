@@ -1,5 +1,6 @@
 import { supabase } from "../db/client.js";
 import { logger } from "./logger.js";
+import { extensionParaMime, MIMES_IMAGEN_ACEPTADOS } from "./mediaExt.js";
 import { analizarComprobante } from "../agent/paymentProof.js";
 import {
   guardarComprobanteReserva,
@@ -16,13 +17,7 @@ export type ResultadoComprobante = {
   razon: string;
 };
 
-const EXTENSION_POR_MIME: Record<string, string> = {
-  "image/jpeg": "jpg",
-  "image/png": "png",
-  "image/webp": "webp",
-};
-
-export const MIMES_ACEPTADOS = Object.keys(EXTENSION_POR_MIME);
+export const MIMES_ACEPTADOS = MIMES_IMAGEN_ACEPTADOS;
 
 /**
  * Guarda y evalúa un comprobante de adelanto, venga de donde venga.
@@ -44,7 +39,7 @@ export async function procesarComprobante(params: {
   mimeType: string;
   origen: OrigenComprobante;
 }): Promise<ResultadoComprobante> {
-  const extension = EXTENSION_POR_MIME[params.mimeType] ?? "jpg";
+  const extension = extensionParaMime(params.mimeType);
   const path = `${params.reservaId}/${Date.now()}.${extension}`;
 
   const { error: uploadError } = await supabase.storage
