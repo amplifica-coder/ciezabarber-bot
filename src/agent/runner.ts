@@ -34,6 +34,44 @@ async function notifyBudgetExceededOnce(): Promise<void> {
 }
 
 /**
+ * La API de Anthropic exige turnos que alternan estrictamente user/assistant
+ * — el historial guardado en `mensajes` no lo garantiza. Varios avisos
+ * automáticos (recordatorio de cita, aviso y liberación de adelanto,
+ * confirmación de pago, nueva reserva) se guardan como 'assistant' sin
+ * ningún turno del cliente en medio; si dos citas en stand-by de la misma
+ * persona expiran seguidas, por ejemplo, quedan cuatro mensajes 'assistant'
+ * consecutivos en el historial. Sin este colapso, esos huecos rompían la
+ * API con un 400 en CADA mensaje siguiente del cliente — no una vez, sino
+ * hasta que esos avisos salían de la ventana de los últimos 20 mensajes o
+ * 24h — dejándolo sin poder hablar con el bot.
+ */
+export function colapsarTurnosConsecutivos(mensajes: Anthropic.MessageParam[]): Anthropic.MessageParam[] {
+  const resultado: Anthropic.MessageParam[] = [];
+  for (const m of mensajes) {
+    const anterior = resultado[resultado.length - 1];
+    if (anterior && anterior.role === m.role && typeof anterior.content === "string" && typeof m.content === "string") {
+      anterior.content = `${anterior.content}\n\n${m.content}`;
+    } else {
+      resultado.push({ ...m });
+    }
+  }
+  return resultado;
+}
+
+/**
+ * Además de alternar, la API exige que el primer turno sea 'user'. Si el
+ * historial arranca con puro aviso automático (poco común, pero posible si
+ * el cliente no escribe hace días y de repente le expira un adelanto justo
+ * antes de volver a escribir), se recorta ese prefijo — el mensaje que el
+ * cliente acaba de mandar siempre queda al final, así que nunca se vacía.
+ */
+export function prepararMessages(mensajes: Anthropic.MessageParam[]): Anthropic.MessageParam[] {
+  const colapsados = colapsarTurnosConsecutivos(mensajes);
+  const primerTurnoUser = colapsados.findIndex((m) => m.role === "user");
+  return primerTurnoUser <= 0 ? colapsados : colapsados.slice(primerTurnoUser);
+}
+
+/**
  * Ejecuta el loop de tool use hasta que Claude devuelve una respuesta final
  * de texto, o hasta agotar MAX_TOOL_ITERATIONS. Cualquier falla (excepción,
  * o agotar las iteraciones sin resolución) termina en el mensaje de
@@ -57,11 +95,12 @@ export async function runAgent(ctx: AgentContext, userMessage: string): Promise<
     // mapRolParaClaude colapsa 'humano' en 'assistant': la API solo acepta
     // user/assistant, y un mensaje escrito por el staff es, para el cliente,
     // otra respuesta del negocio.
-    const messages: Anthropic.MessageParam[] = historial.map((m) => ({
+    const historialMapeado: Anthropic.MessageParam[] = historial.map((m) => ({
       role: mapRolParaClaude(m.rol),
       content: m.contenido,
     }));
-    messages.push({ role: "user", content: userMessage });
+    historialMapeado.push({ role: "user", content: userMessage });
+    const messages = prepararMessages(historialMapeado);
 
     const tools = getToolDefinitions();
 
