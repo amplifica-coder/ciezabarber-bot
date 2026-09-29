@@ -59,13 +59,32 @@ function formatCatalog(services: Service[]): string {
  * La tienda en el prompt y no en una tool: el bot NEGABA que el negocio
  * vendiera productos, así que no bastaba con darle dónde consultarlos —
  * tenía que saber de entrada que existen.
+ *
+ * Los agotados se listan aparte (solo el nombre, sin gastar tokens en precio
+ * y descripción) en vez de omitirlos del todo: sin ellos acá, un cliente que
+ * pide justo uno agotado no tenía ningún indicio de que existe, y el modelo
+ * terminaba generalizando a "no vendemos productos" en vez de "ese puntual
+ * no hay ahorita" — es la falla que de verdad se reportó.
  */
 function formatTienda(productos: Producto[]): string {
+  if (productos.length === 0) return "(sin productos cargados)";
+
   const disponibles = productos.filter((p) => p.stock > 0);
-  if (disponibles.length === 0) return "(sin stock disponible por ahora)";
-  return disponibles
-    .map((p) => `  - ${p.name} — S/ ${p.price}${p.linea ? ` (línea ${p.linea})` : ""}: ${p.description}`)
-    .join("\n");
+  const agotados = productos.filter((p) => p.stock === 0);
+
+  const listaDisponibles = disponibles.length
+    ? disponibles
+        .map((p) => `  - ${p.name} — S/ ${p.price}${p.linea ? ` (línea ${p.linea})` : ""}: ${p.description}`)
+        .join("\n")
+    : "  (nada en stock ahora mismo)";
+
+  const listaAgotados = agotados.length
+    ? `\n\nAgotados por ahora (SÍ los vendemos, solo que no hay stock este momento):\n${agotados
+        .map((p) => `  - ${p.name}`)
+        .join("\n")}`
+    : "";
+
+  return listaDisponibles + listaAgotados;
 }
 
 function formatMultimedia(plantillas: PlantillaMedia[]): string {
@@ -110,10 +129,15 @@ CATÁLOGO DE SERVICIOS ACTIVOS
 ${catalog}
 
 TIENDA MUK
-El negocio SÍ vende productos: es distribuidor autorizado de MUK Hair Perú. Esto está a la venta ahora mismo:
+El negocio SÍ vende productos: es distribuidor autorizado de MUK Hair Perú.
+- Nunca digas frases como "no vendemos productos", "no manejamos venta de productos" o "solo hacemos servicios de
+  barbería": son falsas y se pierde la venta, pase lo que pase con el producto puntual que te pidan. Esa regla NO
+  tiene excepción, ni siquiera si lo que piden está agotado o no está en el catálogo.
 ${tienda}
-- Nunca digas que no vendemos productos ni que solo hacemos servicios: es falso y se pierde la venta.
-- Si preguntan por uno que no está en esa lista, di que ese no lo manejamos y ofrece los que sí hay.
+- Si preguntan por uno que aparece como agotado: dile que ESE en particular no hay stock ahorita (no que "no lo
+  vendemos") y ofrécele los que sí están disponibles.
+- Si preguntan por uno que no aparece en ninguna lista de arriba, di que ese específico no lo manejamos y ofrece
+  los que sí hay — nunca generalices a que no se venden productos.
 - Cómo se compra: se paga por Yape al ${DEPOSITO_YAPE_NUMERO} y se manda la captura por acá. La entrega se
   coordina contigo: retiro en el local o delivery en Lima.
 - Si el cliente escribe desde la web con su pedido ya armado (te llega la lista y el total), confírmale el total,

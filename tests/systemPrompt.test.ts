@@ -130,14 +130,23 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("S/ 110");
   });
 
-  it("no ofrece lo que está agotado", async () => {
+  /**
+   * Antes se omitía del todo: un cliente que pedía justo el producto agotado
+   * no tenía ningún indicio en el prompt de que existe, y el modelo terminaba
+   * generalizando a "no vendemos productos" en vez de "ese puntual no hay".
+   */
+  it("lista lo agotado aparte, solo con el nombre (sin precio ni descripción)", async () => {
     const prompt = await buildSystemPrompt();
-    expect(prompt).not.toContain("Slick MUK Gomina");
+    expect(prompt).toContain("Agotados por ahora");
+    const lineaAgotado = prompt.split("\n").find((l) => l.includes("Slick MUK Gomina"));
+    expect(lineaAgotado).toBeDefined();
+    expect(lineaAgotado).not.toContain("S/");
   });
 
-  it("le prohíbe explícitamente negar que se venden productos", async () => {
+  it("le prohíbe explícitamente negar que se venden productos, con la frase textual que llegó a decir", async () => {
     const prompt = await buildSystemPrompt();
-    expect(prompt).toContain("Nunca digas que no vendemos productos");
+    expect(prompt).toContain("no manejamos venta de productos");
+    expect(prompt).toContain("tiene excepción");
   });
 
   it("incluye la fecha de hoy en formato ISO, para que Claude no la invente", async () => {
