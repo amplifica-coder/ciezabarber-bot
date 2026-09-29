@@ -8,13 +8,25 @@ export type Conversacion = {
   created_at: string;
 };
 
-/** Reutiliza la conversación activa del cliente si existe; si no, crea una nueva. */
+/**
+ * Reutiliza la conversación vigente del cliente si existe (activa O
+ * escalada); si no hay ninguna, o la última quedó cerrada, crea una nueva.
+ *
+ * Antes filtraba solo por 'activa': en cuanto una conversación se escalaba
+ * (a mano, o sola por un error del agente), el siguiente mensaje del mismo
+ * cliente no la encontraba y abría una conversación nueva — el corte de
+ * "conversacion.estado === 'escalada' → el bot se calla" en handleMessage.ts
+ * nunca llegaba a aplicar, porque esta función jamás devolvía una fila
+ * escalada. Un humano tomaba el chat y el bot le seguía respondiendo igual
+ * en la conversación "nueva", y el historial quedaba partido en varias filas
+ * para la misma persona.
+ */
 export async function getOrCreateConversacionActiva(clienteId: string): Promise<Conversacion> {
   const { data: existing, error: findError } = await supabase
     .from("conversaciones")
     .select("*")
     .eq("cliente_id", clienteId)
-    .eq("estado", "activa")
+    .neq("estado", "cerrada")
     .order("ultimo_mensaje_at", { ascending: false })
     .limit(1)
     .maybeSingle();
