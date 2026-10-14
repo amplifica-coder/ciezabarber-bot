@@ -56,6 +56,13 @@ const envSchema = z.object({
   // usa a diario se edita desde el admin (Disponibilidad → Recordatorios).
   RECORDATORIO_HORAS_ANTES: z.coerce.number().int().positive().default(1),
 
+  // Nombres con los que aparece el Yape del negocio en una captura (separados
+  // por coma, sin tildes ni mayúsculas importan). Opcional: el chequeo de
+  // destino siempre usa los últimos dígitos del número; el nombre solo ayuda
+  // cuando la captura no muestra el número. Vacío = una captura que solo trae
+  // un nombre no se puede verificar y no se marca.
+  YAPE_TITULARES: z.string().default(""),
+
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
 });
 

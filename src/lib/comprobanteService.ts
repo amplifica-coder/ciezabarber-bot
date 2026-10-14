@@ -2,6 +2,7 @@ import { supabase } from "../db/client.js";
 import { logger } from "./logger.js";
 import { extensionParaMime, MIMES_IMAGEN_ACEPTADOS } from "./mediaExt.js";
 import { analizarComprobante } from "../agent/paymentProof.js";
+import type { LecturaImagen } from "../agent/visionPago.js";
 import {
   guardarComprobanteReserva,
   confirmarDepositoReserva,
@@ -38,6 +39,8 @@ export async function procesarComprobante(params: {
   buffer: Buffer;
   mimeType: string;
   origen: OrigenComprobante;
+  /** Si quien llama ya leyó la imagen con el modelo, se reutiliza en vez de pagar otra lectura. */
+  lectura?: LecturaImagen | null;
 }): Promise<ResultadoComprobante> {
   const extension = extensionParaMime(params.mimeType);
   const path = `${params.reservaId}/${Date.now()}.${extension}`;
@@ -56,6 +59,7 @@ export async function procesarComprobante(params: {
       imagenBase64: params.buffer.toString("base64"),
       mimeType: params.mimeType,
       montoEsperado: params.depositoEsperado,
+      ...(params.lectura !== undefined ? { lectura: params.lectura } : {}),
     });
   } catch (err) {
     // El fallo es nuestro, no del cliente: se para igual el reloj para no
