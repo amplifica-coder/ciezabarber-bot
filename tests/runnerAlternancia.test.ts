@@ -63,3 +63,14 @@ describe("prepararMessages", () => {
     expect(prepararMessages(entrada)).toEqual(entrada);
   });
 });
+
+describe("respaldo de modelo", () => {
+  it("solo un 404/403 (sin acceso al modelo) activa el respaldo; un 500 o un timeout no", async () => {
+    const { esErrorDeAccesoAlModelo } = await import("../src/agent/runner.js");
+    expect(esErrorDeAccesoAlModelo({ status: 404 })).toBe(true);
+    expect(esErrorDeAccesoAlModelo({ status: 403 })).toBe(true);
+    expect(esErrorDeAccesoAlModelo({ status: 500 })).toBe(false);
+    expect(esErrorDeAccesoAlModelo(new Error("timeout"))).toBe(false);
+    expect(esErrorDeAccesoAlModelo(null)).toBe(false);
+  });
+});

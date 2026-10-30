@@ -11,7 +11,19 @@ import type { AgentContext } from "./tools/types.js";
 
 const anthropic = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
 
-const MODEL = "claude-sonnet-5";
+const MODEL = "claude-sonnet-5-5";
+/**
+ * Si la clave de Anthropic no tiene acceso al modelo principal (404 modelo no
+ * encontrado, 403 sin permiso), se reintenta UNA vez con el anterior en vez de
+ * dejar sin respuesta a todos los clientes: cada fallo escala la conversación
+ * y el bot se calla en ella hasta que alguien la reactive.
+ */
+const MODEL_RESPALDO = "claude-sonnet-5";
+
+export function esErrorDeAccesoAlModelo(err: unknown): boolean {
+  const status = (err as { status?: number } | null)?.status;
+  return status === 404 || status === 403;
+}
 const MAX_TOOL_ITERATIONS = 5;
 const MAX_TOKENS = 1024;
 const BUDGET_NOTICE_THROTTLE_MS = 60 * 60_000;
@@ -105,13 +117,20 @@ export async function runAgent(ctx: AgentContext, userMessage: string): Promise<
     const tools = getToolDefinitions();
 
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
-      const response = await anthropic.messages.create({
-        model: MODEL,
+      const peticion = {
         max_tokens: MAX_TOKENS,
-        system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
+        system: [{ type: "text" as const, text: systemPrompt, cache_control: { type: "ephemeral" as const } }],
         tools,
         messages,
-      });
+      };
+      let response;
+      try {
+        response = await anthropic.messages.create({ model: MODEL, ...peticion });
+      } catch (err) {
+        if (!esErrorDeAccesoAlModelo(err)) throw err;
+        logger.error({ err, modelo: MODEL, respaldo: MODEL_RESPALDO }, "Sin acceso al modelo principal: se usa el de respaldo");
+        response = await anthropic.messages.create({ model: MODEL_RESPALDO, ...peticion });
+      }
 
       const usedTokens =
         response.usage.input_tokens +
