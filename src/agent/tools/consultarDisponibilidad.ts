@@ -3,6 +3,7 @@ import type { AgentTool } from "./types.js";
 import { getServiceById } from "../../db/repositories/services.js";
 import { consultarDisponibilidadReal } from "../../lib/disponibilidadService.js";
 import { BARBEROS } from "../../config/business.js";
+import { bloqueoOrdenLlegada } from "./ordenLlegada.js";
 
 const FECHA_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -33,6 +34,9 @@ export const consultarDisponibilidadTool: AgentTool<z.infer<typeof inputSchema>>
     required: ["servicio_id", "fecha_desde"],
   },
   handler: async (input) => {
+    const bloqueo = await bloqueoOrdenLlegada();
+    if (bloqueo) return bloqueo;
+
     const servicio = await getServiceById(input.servicio_id);
     if (!servicio || !servicio.duration_minutes) {
       return { error: "servicio_no_encontrado" };

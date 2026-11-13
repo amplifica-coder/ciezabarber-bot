@@ -8,6 +8,7 @@ import { vincularSiFichaNueva } from "../db/repositories/cuentaCliente.js";
 import { procesarPedidoWeb, MIMES_PEDIDO } from "../lib/pedidoService.js";
 import { consultarDisponibilidadReal } from "../lib/disponibilidadService.js";
 import { getServiceById } from "../db/repositories/services.js";
+import { getModoReserva } from "../db/repositories/configuracion.js";
 import { findOrCreateByPhone } from "../db/repositories/clientes.js";
 import { crearCitasConsecutivas, getReservaPorToken } from "../db/repositories/citas.js";
 import { procesarComprobante, MIMES_ACEPTADOS } from "../lib/comprobanteService.js";
@@ -53,10 +54,25 @@ const reservaBodySchema = z.object({
  * acá todavía no existe en la consulta de disponibilidad).
  */
 export async function publicRoutes(app: FastifyInstance) {
+  /**
+   * ¿Se puede elegir hora? El modal de reserva de la web lo pregunta al abrirse: en campaña («orden de llegada») no
+   * muestra horarios, solo el aviso. Sin llave de teléfono, la IP es lo único con lo que limitar.
+   */
+  app.get("/public/modo", async (request: FastifyRequest, reply: FastifyReply) => {
+    if (isRateLimited(`modo:${request.ip}`, env.PUBLIC_RATE_LIMIT_MAX_PER_MINUTE * 3)) {
+      return reply.status(429).send({ error: "demasiadas_solicitudes" });
+    }
+    const modo = await getModoReserva();
+    reply.header("Cache-Control", "no-store");
+    return reply.send({ orden_llegada: modo.ordenLlegada, mensaje: modo.ordenLlegada ? modo.mensaje : null });
+  });
+
   app.get("/public/disponibilidad", async (request: FastifyRequest, reply: FastifyReply) => {
     if (isRateLimited(`disp:${request.ip}`, env.PUBLIC_RATE_LIMIT_MAX_PER_MINUTE)) {
       return reply.status(429).send({ error: "demasiadas_solicitudes" });
     }
+    // En campaña no hay horarios que mostrar (defensa por si una pestaña vieja sigue pidiéndolos).
+    if ((await getModoReserva()).ordenLlegada) return reply.send([]);
 
     const parsed = disponibilidadQuerySchema.safeParse(request.query);
     if (!parsed.success) return reply.status(400).send({ error: "invalid_query", detail: parsed.error.issues });
@@ -86,6 +102,10 @@ export async function publicRoutes(app: FastifyInstance) {
     if (isRateLimited(`res:${request.ip}`, env.PUBLIC_RATE_LIMIT_MAX_PER_MINUTE)) {
       return reply.status(429).send({ error: "demasiadas_solicitudes" });
     }
+
+    // Campaña: no se separa hora. Esto es lo que de verdad lo impide; el aviso del modal es solo cortesía.
+    const modo = await getModoReserva();
+    if (modo.ordenLlegada) return reply.status(409).send({ error: "orden_de_llegada", mensaje: modo.mensaje });
 
     const parsed = reservaBodySchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ error: "invalid_body", detail: parsed.error.issues });

@@ -71,6 +71,11 @@ vi.mock("../src/db/repositories/productos.js", () => ({
   ]),
 }));
 
+let modoOrdenLlegada = false;
+vi.mock("../src/db/repositories/configuracion.js", () => ({
+  getModoReserva: async () => ({ ordenLlegada: modoOrdenLlegada, mensaje: "Atendemos por orden de llegada, sin hora." }),
+}));
+
 vi.mock("../src/db/repositories/plantillasMedia.js", () => ({
   listActivePlantillas: vi.fn().mockResolvedValue([
     {
@@ -181,5 +186,33 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("11111111-1111-1111-1111-111111111111");
     expect(prompt).toContain("Catálogo de precios");
     expect(prompt).toContain("Cuando pregunten por precios de todos los servicios juntos.");
+  });
+
+  describe("campaña: atención por orden de llegada", () => {
+    it("con el modo APAGADO conserva el flujo de agendar y el pago por adelantado", async () => {
+      modoOrdenLlegada = false;
+      const prompt = await buildSystemPrompt();
+      expect(prompt).toContain("FLUJO TÍPICO PARA AGENDAR");
+      expect(prompt).toContain("PAGO POR ADELANTADO");
+      expect(prompt).not.toContain("ORDEN DE LLEGADA");
+    });
+
+    it("con el modo ENCENDIDO cambia por completo el flujo: no se ofrecen horas ni se pide Yape para separar", async () => {
+      modoOrdenLlegada = true;
+      try {
+        const prompt = await buildSystemPrompt();
+        expect(prompt).toContain("ATENCIÓN POR ORDEN DE LLEGADA");
+        expect(prompt).toContain("Atendemos por orden de llegada, sin hora.");
+        // Si el flujo de agendar siguiera en el prompt, el modelo seguiría ofreciendo horarios.
+        expect(prompt).not.toContain("FLUJO TÍPICO PARA AGENDAR");
+        expect(prompt).not.toContain("PAGO POR ADELANTADO");
+        expect(prompt).toContain("Nunca ofrezcas, propongas ni confirmes una hora");
+        // Lo demás del prompt sigue: catálogo y tienda.
+        expect(prompt).toContain("Corte + barba");
+        expect(prompt).toContain("TIENDA MUK");
+      } finally {
+        modoOrdenLlegada = false;
+      }
+    });
   });
 });

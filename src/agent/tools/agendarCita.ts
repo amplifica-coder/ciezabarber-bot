@@ -12,6 +12,7 @@ import {
   DEPOSITO_EXPIRA_MINUTOS,
   MAX_ACOMPANANTES,
 } from "../../config/business.js";
+import { bloqueoOrdenLlegada } from "./ordenLlegada.js";
 
 const FECHA_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const HORA_REGEX = /^\d{2}:\d{2}$/;
@@ -57,6 +58,9 @@ export const agendarCitaTool: AgentTool<z.infer<typeof inputSchema>> = {
     required: ["servicio_id", "fecha", "hora"],
   },
   handler: async (input, ctx) => {
+    const bloqueo = await bloqueoOrdenLlegada();
+    if (bloqueo) return bloqueo;
+
     if ((input.acompanantes ?? 0) > MAX_ACOMPANANTES) {
       return {
         ok: false,

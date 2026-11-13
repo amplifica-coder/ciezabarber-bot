@@ -4,6 +4,7 @@ vi.mock("../src/config/env.js", () => ({ env: { LOG_LEVEL: "silent", ESCALATION_
 vi.mock("../src/db/repositories/services.js", () => ({ getServiceById: vi.fn() }));
 vi.mock("../src/db/repositories/clientes.js", () => ({ findOrCreateByPhone: vi.fn(), guardarEmailCliente: vi.fn() }));
 vi.mock("../src/db/repositories/citas.js", () => ({ crearCita: vi.fn() }));
+vi.mock("../src/db/repositories/configuracion.js", () => ({ getModoReserva: async () => ({ ordenLlegada: false, mensaje: "" }) }));
 
 import { agendarCitaTool } from "../src/agent/tools/agendarCita.js";
 import { getServiceById } from "../src/db/repositories/services.js";

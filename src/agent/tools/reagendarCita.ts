@@ -3,6 +3,7 @@ import type { AgentTool } from "./types.js";
 import { reagendarCita } from "../../db/repositories/citas.js";
 import { timeStringToUtcDate } from "../../lib/availability.js";
 import { BUSINESS_TIMEZONE } from "../../config/business.js";
+import { bloqueoOrdenLlegada } from "./ordenLlegada.js";
 
 const FECHA_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const HORA_REGEX = /^\d{2}:\d{2}$/;
@@ -29,6 +30,9 @@ export const reagendarCitaTool: AgentTool<z.infer<typeof inputSchema>> = {
     required: ["cita_id", "fecha", "hora"],
   },
   handler: async (input, ctx) => {
+    const bloqueo = await bloqueoOrdenLlegada();
+    if (bloqueo) return bloqueo;
+
     const nuevoInicioUtc = timeStringToUtcDate(input.fecha, input.hora, BUSINESS_TIMEZONE);
 
     const result = await reagendarCita({
