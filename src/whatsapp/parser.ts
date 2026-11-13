@@ -75,6 +75,12 @@ const metaChangeValue = z.object({
   }),
   contacts: z.array(metaContact).optional(),
   messages: z.array(metaMessage).optional(),
+  // Coexistencia (número en la app WhatsApp Business y en la API). Sin forma
+  // a propósito: cada elemento se valida aparte (parseEcosApp), así un cambio
+  // de Meta en estos campos nunca tumba el webhook normal.
+  message_echoes: z.array(z.unknown()).optional(),
+  history: z.array(z.unknown()).optional(),
+  state_sync: z.array(z.unknown()).optional(),
   // "statuses" (delivery/read receipts) llega en su propio change; no lo
   // declaramos porque nunca nos interesa su contenido, solo detectamos que
   // no trae "messages" para ignorarlo.
@@ -155,4 +161,99 @@ export function parseInboundMessages(rawBody: unknown): InboundMessage[] {
   }
 
   return messages;
+}
+
+
+/* ---------- Coexistencia: lo que se hace desde la app WhatsApp Business del celular ---------- */
+
+const metaEco = z.object({
+  to: z.string().optional(),
+  id: z.string(),
+  timestamp: z.string().optional(),
+  type: z.string(),
+  text: z.object({ body: z.string() }).optional(),
+  image: z.object({ id: z.string(), mime_type: z.string().optional(), caption: z.string().optional() }).optional(),
+  document: z
+    .object({ id: z.string(), mime_type: z.string().optional(), filename: z.string().optional(), caption: z.string().optional() })
+    .optional(),
+  video: z.object({ id: z.string(), mime_type: z.string().optional(), caption: z.string().optional() }).optional(),
+  audio: z.object({ id: z.string(), mime_type: z.string().optional() }).optional(),
+});
+
+/**
+ * Un mensaje que el equipo mandó desde la app WhatsApp Business del celular (evento `smb_message_echoes`). `to` es el
+ * teléfono del cliente. No pasa por el agente: solo se refleja en el panel y el chat pasa a «Yo».
+ */
+export type EcoApp = {
+  id: string;
+  to: string;
+  timestamp?: string;
+  /** Texto del mensaje o el pie de una foto, un video o un documento; null si no trae. */
+  texto: string | null;
+  /** Foto, documento, video o audio: se intenta guardar el archivo. */
+  media?: { tipo: "image" | "document" | "video" | "audio"; mediaId: string; mimeType: string; filename?: string };
+  /** `type` original de Meta (sticker, location, contacts…) cuando no es texto ni archivo. */
+  tipoOriginal: string;
+};
+
+export function parseEcosApp(rawBody: unknown): EcoApp[] {
+  const result = metaWebhookPayload.safeParse(rawBody);
+  if (!result.success) return [];
+
+  const ecos: EcoApp[] = [];
+  for (const entry of result.data.entry) {
+    for (const change of entry.changes) {
+      if (change.field !== "smb_message_echoes" || !change.value.message_echoes) continue;
+      for (const crudo of change.value.message_echoes) {
+        const eco = metaEco.safeParse(crudo);
+        if (!eco.success || !eco.data.to) continue; // sin teléfono del cliente no hay a qué chat reflejarlo
+        const m = eco.data;
+        const base = { id: m.id, to: m.to as string, ...(m.timestamp ? { timestamp: m.timestamp } : {}), tipoOriginal: m.type };
+
+        if (m.type === "text" && m.text) {
+          ecos.push({ ...base, texto: m.text.body });
+        } else if (m.type === "image" && m.image) {
+          ecos.push({ ...base, texto: m.image.caption ?? null, media: { tipo: "image", mediaId: m.image.id, mimeType: m.image.mime_type ?? "image/jpeg" } });
+        } else if (m.type === "document" && m.document) {
+          ecos.push({
+            ...base,
+            texto: m.document.caption ?? null,
+            media: {
+              tipo: "document",
+              mediaId: m.document.id,
+              mimeType: m.document.mime_type ?? "application/octet-stream",
+              ...(m.document.filename ? { filename: m.document.filename } : {}),
+            },
+          });
+        } else if (m.type === "video" && m.video) {
+          ecos.push({ ...base, texto: m.video.caption ?? null, media: { tipo: "video", mediaId: m.video.id, mimeType: m.video.mime_type ?? "video/mp4" } });
+        } else if (m.type === "audio" && m.audio) {
+          ecos.push({ ...base, texto: null, media: { tipo: "audio", mediaId: m.audio.id, mimeType: m.audio.mime_type ?? "audio/ogg" } });
+        } else {
+          ecos.push({ ...base, texto: null });
+        }
+      }
+    }
+  }
+  return ecos;
+}
+
+/** Lo que Meta manda al conectar un número en coexistencia: el historial y los contactos de la app. */
+export type ResumenSincronizacion = { campo: "history" | "smb_app_state_sync"; elementos: number };
+
+/**
+ * Cuenta (sin leer el contenido: trae chats y contactos de personas) lo que llega en los eventos `history` y
+ * `smb_app_state_sync`, para dejar rastro en el log de que la sincronización inicial sí llegó.
+ */
+export function resumenSincronizacion(rawBody: unknown): ResumenSincronizacion[] {
+  const result = metaWebhookPayload.safeParse(rawBody);
+  if (!result.success) return [];
+  const resumen: ResumenSincronizacion[] = [];
+  for (const entry of result.data.entry) {
+    for (const change of entry.changes) {
+      if (change.field === "history") resumen.push({ campo: "history", elementos: change.value.history?.length ?? 0 });
+      else if (change.field === "smb_app_state_sync") resumen.push({ campo: "smb_app_state_sync", elementos: change.value.state_sync?.length ?? 0 });
+    }
+  }
+  return resumen;
 }
