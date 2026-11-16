@@ -14,8 +14,8 @@ export async function getRecordatorioHorasAntes(): Promise<number> {
 
 /** Lo que se le dice a la clienta cuando el negocio atiende por orden de llegada (editable desde el panel). */
 export const MENSAJE_ORDEN_LLEGADA_POR_DEFECTO =
-  "Por la campaña de fin de año atendemos por orden de llegada: no se separa hora. Ven directo al local " +
-  "(Jr. Manuel Gonzales Prada 875, Los Olivos), todos los días de 10:00 a. m. a 9:00 p. m., y te atendemos en el " +
+  "Por la alta demanda de fin de año estamos atendiendo por orden de llegada: no hay horarios para separar. " +
+  "Te atendemos todos los días de 10:00 a. m. a 9:00 p. m. en Jr. Manuel Gonzales Prada 875, Los Olivos, en el " +
   "orden en que llegues.";
 
 export type ModoReserva = { ordenLlegada: boolean; mensaje: string };

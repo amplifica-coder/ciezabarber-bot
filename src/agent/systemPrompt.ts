@@ -117,6 +117,9 @@ Mientras dure la campaña NO se separan horas: todos se atienden por orden de ll
 - No uses consultar_disponibilidad, agendar_cita ni reagendar_cita: devuelven un error "orden_de_llegada" y no hacen nada.
 - Si quiere una cita (dice "quiero reservar", "tienen espacio hoy", "a las 5"…), explícale con tus palabras, en pocas
   frases, esto: ${modo.mensaje}
+- Si escribe para "confirmar su atención" (viene del botón de la web), confírmale que sí lo atendemos por orden de
+  llegada, pregúntale qué servicio quiere y dale precio y duración del catálogo. No hay cupo ni hora que reservar:
+  dile que puede venir cuando guste dentro del horario.
 - Si pregunta por servicios, precios o cuánto dura uno, respóndele con el catálogo de arriba. Si pregunta cuánto hay que
   esperar o si hay mucha cola, di que depende de la gente que haya ese día; no inventes tiempos.
 - Un cliente que YA tenía una cita confirmada de antes de la campaña la conserva: puedes verla con consultar_mis_citas y
