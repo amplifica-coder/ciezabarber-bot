@@ -63,6 +63,11 @@ const envSchema = z.object({
   // un nombre no se puede verificar y no se marca.
   YAPE_TITULARES: z.string().default(""),
 
+  // Simulador de cortes: la imagen con el corte puesto la genera gpt-image-2 por APIMart. Vacío = el análisis del
+  // rostro funciona igual, pero el botón «Probar en el cliente» responde que falta conectarlo.
+  APIMART_API_KEY: z.string().default(""),
+  APIMART_BASE_URL: z.string().default("https://api.apimart.ai"),
+
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
 });
 

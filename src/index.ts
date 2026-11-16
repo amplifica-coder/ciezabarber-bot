@@ -9,6 +9,8 @@ import { adminRoutes } from "./routes/admin.js";
 import { clienteRoutes } from "./routes/cliente.js";
 import { publicRoutes } from "./routes/public.js";
 import { calendarWebhookRoutes } from "./routes/calendarWebhook.js";
+import { simuladorRoutes } from "./routes/simulador.js";
+import { borrarSimulacionesVencidas } from "./db/repositories/simulaciones.js";
 import { syncPendingCitas } from "./calendar/retrySync.js";
 import { sincronizarCambiosCalendar, asegurarCanalWebhook } from "./calendar/pushSync.js";
 import { enviarRecordatoriosPendientes } from "./notifications/recordatorios.js";
@@ -81,6 +83,7 @@ await app.register(adminRoutes);
 await app.register(publicRoutes);
 await app.register(clienteRoutes);
 await app.register(calendarWebhookRoutes);
+await app.register(simuladorRoutes);
 
 try {
   await app.listen({ port: env.PORT, host: "0.0.0.0" });
@@ -129,3 +132,14 @@ setInterval(() => {
     logger.error({ err }, "Fallo la renovación del canal de webhooks de Google Calendar");
   });
 }, CALENDAR_WATCH_CHECK_INTERVAL_MS);
+
+// Las fotos del simulador de cortes son datos personales del cliente: se borran solas a los 7 días.
+setInterval(() => {
+  borrarSimulacionesVencidas()
+    .then((n) => {
+      if (n > 0) logger.info({ borradas: n }, "Simulaciones de corte vencidas borradas");
+    })
+    .catch((err: unknown) => {
+      logger.error({ err }, "Fallo el barrido de simulaciones de corte vencidas");
+    });
+}, 60 * 60_000);
