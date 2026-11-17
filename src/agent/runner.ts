@@ -172,3 +172,35 @@ export async function runAgent(ctx: AgentContext, userMessage: string): Promise<
     return FALLBACK_MESSAGE;
   }
 }
+
+/**
+ * Diagnóstico para el panel (solo staff): hace UNA llamada real con el mismo prompt, herramientas y modelo que usa el
+ * bot y devuelve el resultado o el error tal cual lo manda Anthropic. Existe porque el loop del agente se traga el
+ * error (responde el mensaje de fallback y escala), y los logs de Railway no siempre están a mano.
+ */
+export async function diagnosticarAgente(): Promise<Record<string, unknown>> {
+  const systemPrompt = await buildSystemPrompt();
+  const tools = getToolDefinitions();
+  const salida: Record<string, unknown> = { modelo: MODEL, herramientas: tools.length, largoPrompt: systemPrompt.length };
+  try {
+    const r = await anthropic.messages.create({
+      model: MODEL,
+      max_tokens: MAX_TOKENS,
+      system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
+      tools,
+      messages: [{ role: "user", content: "Hola, ¿cuánto cuesta un corte?" }],
+    });
+    const texto = r.content.find((b): b is Anthropic.TextBlock => b.type === "text")?.text ?? null;
+    return {
+      ...salida,
+      ok: true,
+      stop_reason: r.stop_reason,
+      tipos: r.content.map((b) => b.type),
+      usage: r.usage,
+      texto: texto?.slice(0, 300) ?? null,
+    };
+  } catch (err) {
+    const e = err as { status?: number; message?: string; error?: unknown };
+    return { ...salida, ok: false, status: e.status ?? null, mensaje: e.message ?? String(err), detalle: e.error ?? null };
+  }
+}

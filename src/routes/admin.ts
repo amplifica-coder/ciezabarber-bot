@@ -4,6 +4,7 @@ import { env } from "../config/env.js";
 import { logger } from "../lib/logger.js";
 import { AppError } from "../lib/errors.js";
 import { requireStaff, requireEquipo, puedeTocarCita } from "../lib/adminAuth.js";
+import { diagnosticarAgente } from "../agent/runner.js";
 import { getConversacionConCliente } from "../db/repositories/conversaciones.js";
 import { guardarMensaje } from "../db/repositories/mensajes.js";
 import { getClienteById } from "../db/repositories/clientes.js";
@@ -59,6 +60,12 @@ export async function adminRoutes(app: FastifyInstance) {
    * mensaje, no queremos dejar en el historial algo que el cliente nunca
    * recibió (y que Claude luego leería como contexto real).
    */
+  /** ¿Puede el bot hablar con Claude? Una llamada real, con el error tal cual si falla. Solo staff. */
+  app.get("/admin/diagnostico/ia", async (request: FastifyRequest, reply: FastifyReply) => {
+    await requireStaff(request.headers.authorization);
+    return reply.send(await diagnosticarAgente());
+  });
+
   app.post("/admin/mensajes", async (request: FastifyRequest, reply: FastifyReply) => {
     await requireStaff(request.headers.authorization);
 
