@@ -5,8 +5,23 @@ export type Conversacion = {
   cliente_id: string;
   ultimo_mensaje_at: string;
   estado: "activa" | "escalada" | "cerrada";
+  /** Por qué número escribió el cliente la última vez: el oficial (API de Meta) o el vinculado por QR. 0034. */
+  canal?: Canal | null;
   created_at: string;
 };
+
+export type Canal = "api" | "qr";
+
+/**
+ * Anota por qué número escribió el cliente: la respuesta (del bot o del panel) sale por ese mismo número. Sin la
+ * migración 0034 (columna `canal`) no hace nada: todo sigue saliendo por el número oficial.
+ */
+export async function fijarCanal(conversacion: Conversacion, canal: Canal): Promise<void> {
+  if ((conversacion.canal ?? "api") === canal) return;
+  const { error } = await supabase.from("conversaciones").update({ canal }).eq("id", conversacion.id);
+  if (error && error.code !== "42703" && error.code !== "PGRST204") throw error;
+  conversacion.canal = canal;
+}
 
 /**
  * Reutiliza la conversación vigente del cliente si existe (activa O

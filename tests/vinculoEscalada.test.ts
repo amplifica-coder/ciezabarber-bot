@@ -19,7 +19,9 @@ vi.mock("../src/db/repositories/conversaciones.js", () => ({
   getOrCreateConversacionActiva: vi.fn().mockResolvedValue({ id: "conv1", estado: "escalada" }),
   marcarUltimoMensaje: vi.fn(),
   escalarConversacion: vi.fn(),
+  fijarCanal: vi.fn(),
 }));
+vi.mock("../src/db/repositories/configuracion.js", () => ({ getQrBotResponde: async () => false }));
 const guardarMensajeMock = vi.fn();
 vi.mock("../src/db/repositories/mensajes.js", () => ({ guardarMensaje: (...a: unknown[]) => guardarMensajeMock(...a) }));
 

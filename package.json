@@ -17,15 +17,18 @@
     "@anthropic-ai/sdk": "^0.71.2",
     "@fastify/cors": "^11.3.0",
     "@supabase/supabase-js": "^2.112.3",
+    "@whiskeysockets/baileys": "7.0.0-rc14",
     "fastify": "^5.7.1",
     "googleapis": "^176.0.0",
     "pino": "^10.1.0",
     "pino-pretty": "^13.1.2",
+    "qrcode": "1.5.4",
     "zod": "^4.1.13"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
     "@types/node": "^22.15.29",
+    "@types/qrcode": "1.5.6",
     "eslint": "^9.39.1",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",

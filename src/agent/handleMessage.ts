@@ -2,7 +2,14 @@ import { env } from "../config/env.js";
 import { logger } from "../lib/logger.js";
 import { isRateLimited } from "../lib/rateLimit.js";
 import { findOrCreateByPhone } from "../db/repositories/clientes.js";
-import { getOrCreateConversacionActiva, marcarUltimoMensaje, escalarConversacion } from "../db/repositories/conversaciones.js";
+import {
+  getOrCreateConversacionActiva,
+  marcarUltimoMensaje,
+  escalarConversacion,
+  fijarCanal,
+  type Canal,
+} from "../db/repositories/conversaciones.js";
+import { getQrBotResponde } from "../db/repositories/configuracion.js";
 import { guardarMensaje } from "../db/repositories/mensajes.js";
 import { sendTextIfWindowOpen } from "../whatsapp/window.js";
 import { runAgent, FALLBACK_MESSAGE } from "./runner.js";
@@ -41,7 +48,7 @@ async function runAgentWithTimeout(
   }
 }
 
-export async function handleInboundMessage(message: InboundMessage): Promise<void> {
+export async function handleInboundMessage(message: InboundMessage, canal: Canal = "api"): Promise<void> {
   if (isRateLimited(message.from, env.RATE_LIMIT_MAX_PER_MINUTE)) {
     // Se descarta sin responder: una respuesta (aunque sea de rechazo)
     // premia el abuso con engagement y gasta una llamada a la Graph API.
@@ -51,6 +58,8 @@ export async function handleInboundMessage(message: InboundMessage): Promise<voi
 
   const cliente = await findOrCreateByPhone(message.from, message.contactName);
   const conversacion = await getOrCreateConversacionActiva(cliente.id);
+  // La respuesta (del bot o del panel) sale por el mismo número por el que escribió.
+  await fijarCanal(conversacion, canal);
 
   // Vincular la cuenta del sitio va ANTES de cualquier otro corte: es una
   // operación del sistema, no una charla con el bot. Que un humano esté
@@ -96,7 +105,18 @@ export async function handleInboundMessage(message: InboundMessage): Promise<voi
   // de mensaje se sigue guardando (o, para la imagen, procesando) como
   // siempre; lo único que se salta con la conversación escalada es que el
   // bot le conteste.
-  const escalada = conversacion.estado === "escalada";
+  //
+  // En el número vinculado por QR el bot solo contesta si se activó en el panel: igual que con la escalada, el mensaje
+  // se guarda y lo atiende una persona.
+  let escalada = conversacion.estado === "escalada";
+  if (!escalada && canal === "qr" && !(await getQrBotResponde())) {
+    // El chat queda en «Respondo yo» para que en el panel se vea que lo atiende una persona (y el interruptor del chat
+    // sirva para pasárselo al bot si quieren).
+    escalada = true;
+    await escalarConversacion(conversacion.id).catch((err: unknown) =>
+      logger.warn({ err, conversacionId: conversacion.id }, "No se pudo pasar a «Yo» un chat del número por QR"),
+    );
+  }
 
   if (message.kind === "image") {
     // Un comprobante de pago no puede esperar a que un humano note el chat:

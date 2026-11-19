@@ -1,4 +1,5 @@
 import { env } from "../config/env.js";
+import { puenteQr } from "./qrPuente.js";
 import { logger } from "../lib/logger.js";
 import { AppError } from "../lib/errors.js";
 
@@ -76,6 +77,9 @@ export async function diagnosticarLinea(wabaIdManual?: string): Promise<Record<s
  * bytes, ambos pasos con el mismo Bearer token.
  */
 export async function descargarMedia(mediaId: string): Promise<{ buffer: Buffer; mimeType: string }> {
+  // Un archivo que llegó por el número vinculado por QR se baja de ahí (su «mediaId» es el id del mensaje).
+  const qr = puenteQr();
+  if (qr?.tieneMensaje(mediaId)) return qr.descargarMedia(mediaId);
   const metaRes = await fetch(`${GRAPH_BASE_URL}/${mediaId}`, {
     headers: { Authorization: `Bearer ${env.WHATSAPP_ACCESS_TOKEN}` },
   });

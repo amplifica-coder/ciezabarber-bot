@@ -63,6 +63,14 @@ const envSchema = z.object({
   // un nombre no se puede verificar y no se marca.
   YAPE_TITULARES: z.string().default(""),
 
+  // WhatsApp por QR (Baileys, no oficial): se vincula un número cualquiera desde el panel (Conversaciones). false = apagado.
+  WHATSAPP_QR_HABILITADO: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
+  // Tope de mensajes por minuto por el número vinculado: las ráfagas son lo que más hace que WhatsApp lo bloquee.
+  WHATSAPP_QR_MAX_POR_MINUTO: z.coerce.number().int().positive().default(15),
+
   // Simulador de cortes: la imagen con el corte puesto la genera gpt-image-2 por APIMart. Vacío = el análisis del
   // rostro funciona igual, pero el botón «Probar en el cliente» responde que falta conectarlo.
   APIMART_API_KEY: z.string().default(""),

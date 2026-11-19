@@ -10,6 +10,8 @@ import { clienteRoutes } from "./routes/cliente.js";
 import { publicRoutes } from "./routes/public.js";
 import { calendarWebhookRoutes } from "./routes/calendarWebhook.js";
 import { simuladorRoutes } from "./routes/simulador.js";
+import { whatsappQrRoutes } from "./routes/whatsappQr.js";
+import { arrancarSesionQrSiHayGuardada } from "./whatsapp-qr/sesion.js";
 import { borrarSimulacionesVencidas } from "./db/repositories/simulaciones.js";
 import { syncPendingCitas } from "./calendar/retrySync.js";
 import { sincronizarCambiosCalendar, asegurarCanalWebhook } from "./calendar/pushSync.js";
@@ -84,6 +86,7 @@ await app.register(publicRoutes);
 await app.register(clienteRoutes);
 await app.register(calendarWebhookRoutes);
 await app.register(simuladorRoutes);
+await app.register(whatsappQrRoutes);
 
 try {
   await app.listen({ port: env.PORT, host: "0.0.0.0" });
@@ -114,6 +117,11 @@ setInterval(() => {
 // Arranca el canal de webhooks y hace una primera pasada de sincronización
 // sin bloquear el arranque del servidor — si Google tarda o falla, el
 // healthcheck de Railway no debe depender de eso.
+// WhatsApp por QR: si ya hay un número vinculado, reconecta solo al arrancar (sin bloquear el arranque).
+arrancarSesionQrSiHayGuardada().catch((err: unknown) => {
+  logger.error({ err }, "No se pudo arrancar WhatsApp por QR");
+});
+
 asegurarCanalWebhook().catch((err: unknown) => {
   logger.error({ err }, "No se pudo registrar el canal inicial de webhooks de Google Calendar");
 });

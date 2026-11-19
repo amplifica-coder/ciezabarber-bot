@@ -2,7 +2,7 @@ import { logger } from "../lib/logger.js";
 import { supabase } from "../db/client.js";
 import { extensionParaMime } from "../lib/mediaExt.js";
 import { findOrCreateByPhone } from "../db/repositories/clientes.js";
-import { getOrCreateConversacionActiva, escalarConversacion } from "../db/repositories/conversaciones.js";
+import { getOrCreateConversacionActiva, escalarConversacion, fijarCanal, type Canal } from "../db/repositories/conversaciones.js";
 import { existeWaMessageId, existeMensajeDelNegocioReciente, guardarMensaje } from "../db/repositories/mensajes.js";
 import { descargarMedia } from "../whatsapp/client.js";
 import type { EcoApp } from "../whatsapp/parser.js";
@@ -49,13 +49,14 @@ async function guardarArchivoDelEquipo(conversacionId: string, mediaId: string):
  * NO toca `ultimo_mensaje_at`: esa marca es la última vez que el CLIENTE escribió y de ella sale la ventana de 24 h de
  * Meta; un mensaje de la app no la abre.
  */
-export async function handleEcoApp(eco: EcoApp, esperaMs = ESPERA_ENVIO_PANEL_MS): Promise<void> {
+export async function handleEcoApp(eco: EcoApp, esperaMs = ESPERA_ENVIO_PANEL_MS, canal: Canal = "api"): Promise<void> {
   if (await existeWaMessageId(eco.id)) return;
   await esperar(esperaMs);
   if (await existeWaMessageId(eco.id)) return;
 
   const cliente = await findOrCreateByPhone(eco.to);
   const conversacion = await getOrCreateConversacionActiva(cliente.id);
+  await fijarCanal(conversacion, canal);
 
   const contenido = eco.texto?.trim() || (eco.media ? PLACEHOLDER[eco.media.tipo] : null) || `[${eco.tipoOriginal}]`;
 

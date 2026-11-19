@@ -25,8 +25,8 @@ import { BUSINESS_TIMEZONE, BARBEROS } from "../config/business.js";
 import { getBloqueoPorId, eliminarBloqueoPorId } from "../db/repositories/bloqueos.js";
 import { getPlantillaById, urlPublicaPlantilla } from "../db/repositories/plantillasMedia.js";
 import { deleteCalendarEvent } from "../calendar/google.js";
-import { sendText, sendTemplate, sendMedia } from "../whatsapp/client.js";
-import { isWindowOpenFor } from "../whatsapp/window.js";
+import { sendTemplate } from "../whatsapp/client.js";
+import { isWindowOpenFor, enviarTextoLibre, enviarMediaLibre } from "../whatsapp/window.js";
 
 // Exactamente uno de los dos: o el staff escribe texto, o elige una
 // plantilla multimedia de la biblioteca — nunca ambos ni ninguno.
@@ -79,6 +79,12 @@ export async function adminRoutes(app: FastifyInstance) {
     if (!found) return reply.status(404).send({ error: "conversacion_no_encontrada" });
 
     if (!(await isWindowOpenFor(found.telefono))) {
+      if (found.conversacion.canal === "qr") {
+        return reply.status(409).send({
+          error: "whatsapp_qr_desconectado",
+          mensaje: "Este cliente escribió al WhatsApp vinculado por QR y ese número no está conectado. Vuelve a vincularlo en Conversaciones.",
+        });
+      }
       // Meta rechaza el texto libre pasadas 24h del último mensaje del
       // cliente (error 131047). Se avisa explícito para que el panel pueda
       // ofrecer una plantilla en vez de fallar sin explicación.
@@ -91,14 +97,14 @@ export async function adminRoutes(app: FastifyInstance) {
 
     let mensaje;
     if (texto) {
-      await sendText(found.telefono, texto);
+      await enviarTextoLibre(found.telefono, texto);
       mensaje = await guardarMensaje({ conversacionId, rol: "humano", contenido: texto });
     } else {
       const plantilla = await getPlantillaById(plantillaId!);
       if (!plantilla) return reply.status(404).send({ error: "plantilla_no_encontrada" });
 
       const url = urlPublicaPlantilla(plantilla.storage_path);
-      await sendMedia({ to: found.telefono, tipo: plantilla.tipo, link: url, caption: plantilla.caption });
+      await enviarMediaLibre({ telefono: found.telefono, tipo: plantilla.tipo, link: url, caption: plantilla.caption });
       mensaje = await guardarMensaje({
         conversacionId,
         rol: "humano",

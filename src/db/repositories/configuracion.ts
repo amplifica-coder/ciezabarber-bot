@@ -36,3 +36,13 @@ export async function getModoReserva(): Promise<ModoReserva> {
     mensaje: fila.orden_llegada_mensaje?.trim() || MENSAJE_ORDEN_LLEGADA_POR_DEFECTO,
   };
 }
+
+/**
+ * ¿El bot contesta en el número vinculado por QR? Apagado por defecto (y si falla la lectura o falta la migración 0034):
+ * puede ser un número personal, y que el bot le hable a los contactos de alguien es peor que no contestar.
+ */
+export async function getQrBotResponde(): Promise<boolean> {
+  const { data, error } = await supabase.from("configuracion").select("*").single();
+  if (error || !data) return false;
+  return (data as { qr_bot_responde?: boolean | null }).qr_bot_responde === true;
+}

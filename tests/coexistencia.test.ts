@@ -16,6 +16,7 @@ vi.mock("../src/db/repositories/conversaciones.js", () => ({
   getOrCreateConversacionActiva: (...a: unknown[]) => getConvMock(...a),
   escalarConversacion: (...a: unknown[]) => escalarMock(...a),
   marcarUltimoMensaje: (...a: unknown[]) => marcarUltimoMock(...a),
+  fijarCanal: vi.fn(),
 }));
 
 const existeIdMock = vi.fn();

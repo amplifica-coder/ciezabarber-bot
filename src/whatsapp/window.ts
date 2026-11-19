@@ -1,6 +1,7 @@
 import { supabase } from "../db/client.js";
 import { sendText, sendMedia, sendTemplate, type TipoMediaWhatsApp } from "./client.js";
 import { logger } from "../lib/logger.js";
+import { puenteQr } from "./qrPuente.js";
 
 const WINDOW_MS = 24 * 60 * 60_000;
 
@@ -21,15 +22,73 @@ export function isWithin24hWindow(lastInboundAt: Date | null, now = new Date()):
  * cliente real).
  */
 export async function getLastInboundAt(telefono: string): Promise<Date | null> {
-  const { data, error } = await supabase
-    .from("conversaciones")
-    .select("ultimo_mensaje_at, clientes!inner(telefono)")
-    .eq("clientes.telefono", telefono)
-    .order("ultimo_mensaje_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  return (await getEstadoEnvio(telefono)).lastInboundAt;
+}
+
+type EstadoEnvio = { lastInboundAt: Date | null; canal: "api" | "qr" };
+
+/**
+ * Última vez que escribió y por qué número (el oficial o el vinculado por QR). Sin la migración 0034 (columna `canal`)
+ * se reintenta sin ella y todo cuenta como el número oficial.
+ */
+async function getEstadoEnvio(telefono: string): Promise<EstadoEnvio> {
+  const consulta = (columnas: string) =>
+    supabase
+      .from("conversaciones")
+      .select(columnas)
+      .eq("clientes.telefono", telefono)
+      .order("ultimo_mensaje_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+  let { data, error } = await consulta("ultimo_mensaje_at, canal, clientes!inner(telefono)");
+  if (error && (error.code === "42703" || error.code === "PGRST204")) {
+    ({ data, error } = await consulta("ultimo_mensaje_at, clientes!inner(telefono)"));
+  }
   if (error) throw error;
-  return data ? new Date(data.ultimo_mensaje_at as string) : null;
+  const fila = data as { ultimo_mensaje_at?: string; canal?: string | null } | null;
+  return {
+    lastInboundAt: fila?.ultimo_mensaje_at ? new Date(fila.ultimo_mensaje_at) : null,
+    canal: fila?.canal === "qr" ? "qr" : "api",
+  };
+}
+
+/**
+ * ¿Se le puede escribir texto libre ahora y por dónde? Por QR no hay ventana de 24 h, pero el número tiene que estar
+ * conectado; si no lo está, no se cae en silencio al número oficial (el cliente nunca le escribió ahí).
+ */
+async function rutaDeEnvio(telefono: string): Promise<"api" | "qr" | null> {
+  const { lastInboundAt, canal } = await getEstadoEnvio(telefono);
+  if (canal === "qr") return puenteQr()?.conectado() ? "qr" : null;
+  return isWithin24hWindow(lastInboundAt) ? "api" : null;
+}
+
+/**
+ * Texto libre por el número por el que escribió el cliente. Quien llama ya comprobó que se puede (isWindowOpenFor).
+ */
+export async function enviarTextoLibre(telefono: string, body: string): Promise<void> {
+  const { canal } = await getEstadoEnvio(telefono);
+  const qr = puenteQr();
+  if (canal === "qr" && qr?.conectado()) {
+    await qr.enviarTexto(telefono, body);
+    return;
+  }
+  await sendText(telefono, body);
+}
+
+/** Igual que enviarTextoLibre, para fotos, videos, audios y documentos. */
+export async function enviarMediaLibre(params: {
+  telefono: string;
+  tipo: TipoMediaWhatsApp;
+  link: string;
+  caption?: string | null;
+}): Promise<void> {
+  const { canal } = await getEstadoEnvio(params.telefono);
+  const qr = puenteQr();
+  if (canal === "qr" && qr?.conectado()) {
+    await qr.enviarMedia({ para: params.telefono, tipo: params.tipo, link: params.link, caption: params.caption ?? null });
+    return;
+  }
+  await sendMedia({ to: params.telefono, tipo: params.tipo, link: params.link, caption: params.caption ?? null });
 }
 
 /**
@@ -41,12 +100,13 @@ export async function getLastInboundAt(telefono: string): Promise<Date | null> {
  * del bot en las últimas 24h.
  */
 export async function sendTextIfWindowOpen(telefono: string, body: string): Promise<void> {
-  const lastInboundAt = await getLastInboundAt(telefono);
-  if (!isWithin24hWindow(lastInboundAt)) {
-    logger.warn({ telefono, lastInboundAt }, "Ventana de 24h cerrada, requiere seguimiento manual");
+  const ruta = await rutaDeEnvio(telefono);
+  if (!ruta) {
+    logger.warn({ telefono }, "No se puede escribir ahora (ventana de 24h cerrada o QR desconectado), requiere seguimiento manual");
     return;
   }
-  await sendText(telefono, body);
+  if (ruta === "qr") await puenteQr()!.enviarTexto(telefono, body);
+  else await sendText(telefono, body);
 }
 
 /**
@@ -66,7 +126,7 @@ export async function avisarStaff(params: {
   parametros: string[];
 }): Promise<void> {
   if (await isWindowOpenFor(params.telefono)) {
-    await sendText(params.telefono, params.texto);
+    await enviarTextoLibre(params.telefono, params.texto);
     return;
   }
   if (!params.plantilla) {
@@ -83,7 +143,7 @@ export async function avisarStaff(params: {
 
 /** ¿Se le puede escribir texto libre a este número ahora mismo? */
 export async function isWindowOpenFor(telefono: string): Promise<boolean> {
-  return isWithin24hWindow(await getLastInboundAt(telefono));
+  return (await rutaDeEnvio(telefono)) !== null;
 }
 
 /**
@@ -98,11 +158,15 @@ export async function sendMediaIfWindowOpen(params: {
   link: string;
   caption?: string | null;
 }): Promise<boolean> {
-  const lastInboundAt = await getLastInboundAt(params.telefono);
-  if (!isWithin24hWindow(lastInboundAt)) {
-    logger.warn({ telefono: params.telefono, lastInboundAt }, "Ventana de 24h cerrada, no se pudo mandar multimedia");
+  const ruta = await rutaDeEnvio(params.telefono);
+  if (!ruta) {
+    logger.warn({ telefono: params.telefono }, "No se puede mandar multimedia ahora (ventana de 24h cerrada o QR desconectado)");
     return false;
   }
-  await sendMedia({ to: params.telefono, tipo: params.tipo, link: params.link, caption: params.caption ?? null });
+  if (ruta === "qr") {
+    await puenteQr()!.enviarMedia({ para: params.telefono, tipo: params.tipo, link: params.link, caption: params.caption ?? null });
+  } else {
+    await sendMedia({ to: params.telefono, tipo: params.tipo, link: params.link, caption: params.caption ?? null });
+  }
   return true;
 }

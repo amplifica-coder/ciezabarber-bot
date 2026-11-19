@@ -1,8 +1,8 @@
 import { env } from "../config/env.js";
 import { BUSINESS_TIMEZONE } from "../config/business.js";
 import { logger } from "../lib/logger.js";
-import { sendText, sendTemplate } from "../whatsapp/client.js";
-import { isWindowOpenFor } from "../whatsapp/window.js";
+import { sendTemplate } from "../whatsapp/client.js";
+import { isWindowOpenFor, enviarTextoLibre } from "../whatsapp/window.js";
 import {
   listarCitasSinRecordatorio,
   reservarNotificacion,
@@ -48,7 +48,7 @@ async function enviarRecordatorio(params: {
   cuando: string;
 }): Promise<void> {
   if (await isWindowOpenFor(params.telefono)) {
-    await sendText(params.telefono, textoRecordatorio(params.nombre, params.servicio, params.cuando));
+    await enviarTextoLibre(params.telefono, textoRecordatorio(params.nombre, params.servicio, params.cuando));
     return;
   }
   await sendTemplate({
