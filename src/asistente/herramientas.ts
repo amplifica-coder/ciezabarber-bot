@@ -69,22 +69,83 @@ const finTelefono = (t: string) => `…${t.slice(-3)}`;
 const sinTildes = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
 
 type ClienteResuelto = {
-  /** null = sin ficha propia: va a «Cliente de mostrador» (no se inventan teléfonos). */
+  /** null = cliente de mostrador (solo si la persona lo pidió así). */
   telefono: string | null;
   nombre: string | null;
+  /** Ya tenía ficha en la base. */
+  existente: boolean;
   /** Cómo se muestra en el resumen que se confirma. */
   etiqueta: string;
 };
 
+/** «987 654 321», «+51 987654321», «51987654321» → «51987654321». Otro país (10–15 dígitos) se acepta tal cual. Null si no cuadra. */
+export function normalizarCelular(texto: string | undefined): string | null {
+  const d = (texto ?? "").replace(/\D/g, "");
+  if (d.length === 9 && d.startsWith("9")) return `51${d}`;
+  if (d.length === 11 && d.startsWith("519")) return d;
+  if (d.length >= 10 && d.length <= 15 && !d.startsWith("51")) return d;
+  return null;
+}
+
+/** Nombre y apellido: al menos dos palabras de 2 letras o más. */
+export function esNombreCompleto(nombre: string | undefined): boolean {
+  const palabras = (nombre ?? "").trim().split(/\s+/).filter((p) => p.replace(/[^\p{L}]/gu, "").length >= 2);
+  return palabras.length >= 2;
+}
+
+const formatoCelular = (t: string) => (t.length === 11 && t.startsWith("51") ? `${t.slice(2, 5)} ${t.slice(5, 8)} ${t.slice(8)}` : `+${t}`);
+
 /**
- * Quién es el cliente. Con teléfono, ese. Solo con el nombre, se busca su ficha: si hay una sola (o una con el nombre
- * exacto) se usa; si hay varias, se pregunta cuál; si no hay ninguna, va como cliente de mostrador con el nombre en la
- * nota, para que no se pierda.
+ * Quién es el cliente, con el registro completo: nombre y apellido + celular. Devuelve el cliente o la lista de lo que
+ * falta, para que el asistente lo pida todo de una vez («falta su apellido y su número»).
+ *  - Con número: si ese número ya tiene ficha, se usa (y si su ficha no tenía nombre, se completa); si el número es de
+ *    otra persona, se pregunta. Si es nuevo, hace falta nombre y apellido.
+ *  - Solo con nombre: se busca su ficha. Una sola (o una con el nombre exacto) → se avisa que ya está registrado. Varias →
+ *    se pregunta cuál. Ninguna → es nuevo: falta el número (y el apellido si solo dijo el nombre).
+ *  - Sin nada: falta el cliente, salvo que la persona haya dicho que es cliente de mostrador.
  */
-export async function resolverCliente(nombre?: string, telefono?: string): Promise<ClienteResuelto> {
-  const tel = telefono?.replace(/\D/g, "") ?? "";
-  if (tel.length >= 6) return { telefono: tel, nombre: nombre ?? null, etiqueta: `${nombre ? `${nombre} ` : ""}(${tel})` };
-  if (!nombre) return { telefono: null, nombre: null, etiqueta: "cliente de mostrador" };
+export async function resolverCliente(params: {
+  nombre?: string | undefined;
+  telefono?: string | undefined;
+  mostrador?: boolean | undefined;
+}): Promise<{ cliente: ClienteResuelto | null; faltan: string[] }> {
+  const nombre = params.nombre?.trim() || undefined;
+
+  if (params.telefono?.trim()) {
+    const tel = normalizarCelular(params.telefono);
+    if (!tel) return { cliente: null, faltan: ["el número de celular completo del cliente (9 dígitos, empieza con 9)"] };
+    const { data, error } = await supabase.from("clientes").select("nombre, telefono").eq("telefono", tel).limit(1);
+    if (error) throw error;
+    const ficha = ((data ?? []) as { nombre: string | null; telefono: string }[])[0];
+    if (ficha) {
+      const suyo = ficha.nombre?.trim();
+      if (suyo && nombre && !sinTildes(suyo).includes(sinTildes(nombre).split(" ")[0]!) && !sinTildes(nombre).includes(sinTildes(suyo).split(" ")[0]!)) {
+        throw new AppError(
+          `El número ${formatoCelular(tel)} ya está registrado a nombre de ${suyo}, no de ${nombre}. Pregunta si es la misma persona: ` +
+            "si sí, vuelve a pedirlo solo con el número; si no, pide el número correcto.",
+          "telefono_de_otro_cliente",
+          409,
+        );
+      }
+      if (!suyo && !esNombreCompleto(nombre)) {
+        return { cliente: null, faltan: ["el nombre y apellido del cliente (su ficha no tiene nombre)"] };
+      }
+      const final = suyo || nombre!;
+      return {
+        cliente: { telefono: tel, nombre: final, existente: true, etiqueta: `cliente ya registrado: ${final} (${formatoCelular(tel)})` },
+        faltan: [],
+      };
+    }
+    if (!esNombreCompleto(nombre)) {
+      return { cliente: null, faltan: [nombre ? "el apellido del cliente" : "el nombre y apellido del cliente"] };
+    }
+    return { cliente: { telefono: tel, nombre: nombre!, existente: false, etiqueta: `cliente nuevo: ${nombre} (${formatoCelular(tel)})` }, faltan: [] };
+  }
+
+  if (!nombre) {
+    if (params.mostrador) return { cliente: { telefono: null, nombre: null, existente: false, etiqueta: "cliente de mostrador (sin datos)" }, faltan: [] };
+    return { cliente: null, faltan: ["el nombre y apellido del cliente", "su número de celular"] };
+  }
 
   const busqueda = nombre.replace(/[%,()]/g, " ").trim();
   const { data, error } = await supabase
@@ -98,13 +159,32 @@ export async function resolverCliente(nombre?: string, telefono?: string): Promi
   const exactos = encontrados.filter((c) => sinTildes(c.nombre ?? "") === sinTildes(nombre));
   const elegido = exactos.length === 1 ? exactos[0] : encontrados.length === 1 ? encontrados[0] : null;
   if (elegido) {
-    return { telefono: elegido.telefono, nombre: elegido.nombre, etiqueta: `${elegido.nombre} (${finTelefono(elegido.telefono)})` };
+    return {
+      cliente: {
+        telefono: elegido.telefono,
+        nombre: elegido.nombre,
+        existente: true,
+        etiqueta: `cliente ya registrado: ${elegido.nombre} (${formatoCelular(elegido.telefono)})`,
+      },
+      faltan: [],
+    };
   }
   if (encontrados.length > 1) {
-    const lista = encontrados.map((c) => `${c.nombre} (${finTelefono(c.telefono)})`).join(", ");
-    throw new AppError(`Hay varios clientes que coinciden con «${nombre}»: ${lista}. Pregunta cuál es o su teléfono.`, "cliente_ambiguo", 409);
+    const lista = encontrados.map((c) => `${c.nombre} (termina en ${c.telefono.slice(-3)})`).join(", ");
+    throw new AppError(
+      `Ya hay varios clientes registrados que coinciden con «${nombre}»: ${lista}. Pregunta cuál es, o su número si es otra persona.`,
+      "cliente_ambiguo",
+      409,
+    );
   }
-  return { telefono: null, nombre, etiqueta: `${nombre} (sin ficha: va como cliente de mostrador)` };
+  // No está registrado: es un cliente nuevo y su ficha tiene que quedar completa.
+  return { cliente: null, faltan: [...(esNombreCompleto(nombre) ? [] : ["el apellido del cliente"]), "su número de celular (es cliente nuevo)"] };
+}
+
+function exigirCompleto(faltan: string[], que: string): void {
+  if (faltan.length === 0) return;
+  const lista = faltan.length === 1 ? faltan[0] : `${faltan.slice(0, -1).join(", ")} y ${faltan[faltan.length - 1]}`;
+  throw new AppError(`Para ${que} falta: ${lista}. Pídeselo a la persona en una frase.`, "faltan_datos", 400);
 }
 
 /* ------------------------------------------------------------------------------------------------------------------ */
@@ -121,24 +201,25 @@ const esquemas = {
   registrar_servicio_atendido: z.object({
     servicio_ids: z.array(z.string().min(1)).min(1).max(10),
     barbero: z.enum(BARBEROS).optional(),
-    metodo_pago: METODO,
+    metodo_pago: METODO.optional(),
     fecha: FECHA.optional(),
     hora: HORA.optional(),
     nombre_cliente: z.string().trim().max(120).optional(),
     telefono_cliente: z.string().trim().max(20).optional(),
+    cliente_mostrador: z.boolean().optional(),
     notas: z.string().trim().max(500).optional(),
   }),
   registrar_venta_producto: z.object({
     producto_id: z.string().min(1),
     cantidad: z.number().int().positive().max(50),
-    metodo_pago: METODO,
+    metodo_pago: METODO.optional(),
     nota: z.string().trim().max(300).optional(),
   }),
   crear_cita: z.object({
     servicio_id: z.string().min(1),
     fecha: FECHA,
     hora: HORA,
-    nombre_cliente: z.string().trim().min(2).max(120),
+    nombre_cliente: z.string().trim().max(120).optional(),
     telefono_cliente: z.string().trim().max(20).optional(),
     barbero: z.enum(BARBEROS).optional(),
     notas: z.string().trim().max(500).optional(),
@@ -226,9 +307,10 @@ export const DEFINICIONES: Anthropic.Tool[] = [
   {
     name: "registrar_servicio_atendido",
     description:
-      "ACCIÓN. Registra uno o varios servicios YA atendidos (cliente sin reserva que se atendió y pagó). Requiere los ids " +
-      "de servicio, el barbero y el medio de pago. Sin fecha/hora = ahora. Para el cliente basta su nombre (se busca su " +
-      "ficha); si no dicen cliente, va como cliente de mostrador.",
+      "ACCIÓN. Registra uno o varios servicios YA atendidos (cliente sin reserva que se atendió y pagó). El registro tiene " +
+      "que quedar completo: servicio, barbero, medio de pago y cliente (nombre y apellido + celular; si ya está registrado " +
+      "basta el nombre o el número). Llámala aunque falten datos: responde exactamente qué falta. Sin fecha/hora = ahora. " +
+      "cliente_mostrador=true solo si la persona dice explícitamente que el cliente no dio sus datos.",
     input_schema: {
       type: "object",
       properties: {
@@ -237,11 +319,12 @@ export const DEFINICIONES: Anthropic.Tool[] = [
         metodo_pago: prop.metodo,
         fecha: prop.fecha,
         hora: { ...prop.hora, description: "Hora en que EMPEZÓ la atención (HH:MM, Lima)" },
-        nombre_cliente: { type: "string" },
-        telefono_cliente: { type: "string" },
+        nombre_cliente: { type: "string", description: "Nombre y apellido del cliente" },
+        telefono_cliente: { type: "string", description: "Celular del cliente, tal como lo dictaron" },
+        cliente_mostrador: { type: "boolean" },
         notas: { type: "string" },
       },
-      required: ["servicio_ids", "metodo_pago"],
+      required: ["servicio_ids"],
       additionalProperties: false,
     },
   },
@@ -251,15 +334,15 @@ export const DEFINICIONES: Anthropic.Tool[] = [
     input_schema: {
       type: "object",
       properties: { producto_id: { type: "string" }, cantidad: { type: "integer" }, metodo_pago: prop.metodo, nota: { type: "string" } },
-      required: ["producto_id", "cantidad", "metodo_pago"],
+      required: ["producto_id", "cantidad"],
       additionalProperties: false,
     },
   },
   {
     name: "crear_cita",
     description:
-      "ACCIÓN. Agenda una cita futura (nace confirmada, sin adelanto). Requiere servicio, fecha, hora y el nombre del " +
-      "cliente; el teléfono solo si es un cliente nuevo (si ya tiene ficha, se busca por su nombre).",
+      "ACCIÓN. Agenda una cita futura (nace confirmada, sin adelanto). Requiere servicio, fecha, hora y cliente (nombre y " +
+      "apellido + celular; si ya está registrado basta el nombre o el número). Llámala aunque falten datos: responde qué falta.",
     input_schema: {
       type: "object",
       properties: {
@@ -271,7 +354,7 @@ export const DEFINICIONES: Anthropic.Tool[] = [
         barbero: prop.barbero,
         notas: { type: "string" },
       },
-      required: ["servicio_id", "fecha", "hora", "nombre_cliente"],
+      required: ["servicio_id", "fecha", "hora"],
       additionalProperties: false,
     },
   },
@@ -453,14 +536,25 @@ export async function prepararAccion(nombre: NombreHerramienta, entrada: unknown
     case "registrar_servicio_atendido": {
       const e = esquemas.registrar_servicio_atendido.parse(entrada);
       const barbero = barberoPermitido(user, e.barbero);
-      if (!barbero) throw new AppError("Falta decir qué barbero atendió.", "falta_barbero", 400);
       const servicios = await Promise.all(e.servicio_ids.map((id) => getServiceById(id)));
       if (servicios.some((s) => !s)) throw new AppError("Algún servicio no existe: usa ver_servicios.", "servicio_no_encontrado", 400);
+      const { cliente: resuelto, faltan } = await resolverCliente({
+        nombre: e.nombre_cliente,
+        telefono: e.telefono_cliente,
+        mostrador: e.cliente_mostrador,
+      });
+      exigirCompleto(
+        [
+          ...(barbero ? [] : ["qué barbero lo atendió"]),
+          ...(e.metodo_pago ? [] : ["con qué pagó (Yape/Plin, tarjeta o efectivo)"]),
+          ...faltan,
+        ],
+        "registrar el servicio",
+      );
       const total = servicios.reduce((t, s) => t + precioNum(s!.price), 0);
       const fecha = e.fecha ?? hoy.fecha;
       const hora = e.hora ?? hoy.hora;
-      const resuelto = await resolverCliente(e.nombre_cliente, e.telefono_cliente);
-      const cliente = resuelto.etiqueta;
+      const cliente = resuelto!.etiqueta;
       return {
         nombre,
         entrada: {
@@ -468,25 +562,26 @@ export async function prepararAccion(nombre: NombreHerramienta, entrada: unknown
           barbero,
           fecha,
           hora,
-          ...(resuelto.telefono ? { telefono_cliente: resuelto.telefono } : {}),
-          ...(resuelto.nombre ? { nombre_cliente: resuelto.nombre } : {}),
+          ...(resuelto!.telefono ? { telefono_cliente: resuelto!.telefono } : {}),
+          ...(resuelto!.nombre ? { nombre_cliente: resuelto!.nombre } : {}),
         },
         resumen:
           `Registrar ${servicios.map((s) => s!.name).join(" + ")} (${soles(total)}) atendido por ${barbero}, ` +
-          `pagó con ${METODO_TEXTO[e.metodo_pago]}, ${fecha === hoy.fecha ? "hoy" : fecha} ${hora} · ${cliente}.`,
+          `pagó con ${METODO_TEXTO[e.metodo_pago!]}, ${fecha === hoy.fecha ? "hoy" : fecha} ${hora} · ${cliente}.`,
       };
     }
     case "registrar_venta_producto": {
       const e = esquemas.registrar_venta_producto.parse(entrada);
       const producto = (await listActiveProducts()).find((p) => p.id === e.producto_id);
       if (!producto) throw new AppError("Ese producto no existe o está archivado: usa ver_productos.", "producto_no_encontrado", 400);
+      exigirCompleto(e.metodo_pago ? [] : ["con qué pagó (Yape/Plin, tarjeta o efectivo)"], "registrar la venta");
       if (e.cantidad > producto.stock) {
         throw new AppError(`Solo hay ${producto.stock} en stock de ${producto.name}.`, "sin_stock", 409);
       }
       return {
         nombre,
         entrada: e,
-        resumen: `Registrar venta: ${e.cantidad} × ${producto.name} = ${soles(e.cantidad * precioNum(producto.price))}, pagó con ${METODO_TEXTO[e.metodo_pago]}.`,
+        resumen: `Registrar venta: ${e.cantidad} × ${producto.name} = ${soles(e.cantidad * precioNum(producto.price))}, pagó con ${METODO_TEXTO[e.metodo_pago!]}.`,
       };
     }
     case "crear_cita": {
@@ -494,17 +589,15 @@ export async function prepararAccion(nombre: NombreHerramienta, entrada: unknown
       const barbero = barberoPermitido(user, e.barbero);
       const servicio = await getServiceById(e.servicio_id);
       if (!servicio?.duration_minutes) throw new AppError("Ese servicio no existe o no tiene duración.", "servicio_no_encontrado", 400);
-      const resuelto = await resolverCliente(e.nombre_cliente, e.telefono_cliente);
-      // Una cita futura necesita a quién avisarle: sin ficha ni teléfono no se agenda.
-      if (!resuelto.telefono) {
-        throw new AppError(`No encontré a «${e.nombre_cliente}» entre los clientes: para agendar necesito su teléfono.`, "falta_telefono", 400);
-      }
+      // Una cita futura necesita a quién avisarle: nunca de mostrador.
+      const { cliente: resuelto, faltan } = await resolverCliente({ nombre: e.nombre_cliente, telefono: e.telefono_cliente });
+      exigirCompleto(faltan, "agendar la cita");
       return {
         nombre,
-        entrada: { ...e, telefono_cliente: resuelto.telefono, nombre_cliente: resuelto.nombre ?? e.nombre_cliente, ...(barbero ? { barbero } : {}) },
+        entrada: { ...e, telefono_cliente: resuelto!.telefono!, nombre_cliente: resuelto!.nombre ?? e.nombre_cliente, ...(barbero ? { barbero } : {}) },
         resumen:
           `Agendar ${servicio.name} el ${e.fecha} a las ${e.hora}${barbero ? ` con ${barbero}` : " (barbero libre)"} ` +
-          `para ${resuelto.etiqueta}.`,
+          `para ${resuelto!.etiqueta}.`,
       };
     }
     case "cambiar_estado_cita": {
@@ -552,25 +645,31 @@ const MENSAJE_RAZON: Record<string, string> = {
   no_encontrada: "Esa cita ya no existe.",
 };
 
+/** La ficha del cliente por su número, creándola si no existe; si su ficha no tenía nombre, se completa. */
+async function clienteConNombre(telefono: string, nombre: string | undefined) {
+  const cliente = await findOrCreateByPhone(telefono, nombre);
+  if (nombre && !cliente.nombre?.trim()) {
+    const { error } = await supabase.from("clientes").update({ nombre }).eq("id", cliente.id);
+    if (error) throw error;
+  }
+  return cliente;
+}
+
 /** Ejecuta una acción ya confirmada. Vuelve a validar todo (la confirmación viene del navegador). Devuelve el texto de resultado. */
 export async function ejecutarAccion(nombre: NombreHerramienta, entrada: unknown, user: AdminUser): Promise<string> {
   const { entrada: e, resumen } = await prepararAccion(nombre, entrada, user);
   switch (nombre) {
     case "registrar_servicio_atendido": {
       const d = esquemas.registrar_servicio_atendido.parse(e);
-      const telefono = d.telefono_cliente?.replace(/\D/g, "") || "mostrador";
-      const cliente = await findOrCreateByPhone(telefono, telefono === "mostrador" ? "Cliente de mostrador" : d.nombre_cliente);
-      // Sin ficha propia, el nombre que dijeron queda en la nota del servicio (si no, se perdería en «mostrador»).
-      const notas = [telefono === "mostrador" && d.nombre_cliente ? `Cliente: ${d.nombre_cliente}` : null, d.notas]
-        .filter(Boolean)
-        .join(" — ");
+      const telefono = d.telefono_cliente || "mostrador";
+      const cliente = await clienteConNombre(telefono, telefono === "mostrador" ? "Cliente de mostrador" : d.nombre_cliente);
       const r = await registrarServiciosAtendidos({
         clienteId: cliente.id,
         servicioIds: d.servicio_ids,
         inicioUtc: timeStringToUtcDate(d.fecha!, d.hora!, BUSINESS_TIMEZONE),
         barbero: d.barbero!,
-        metodoPago: d.metodo_pago,
-        ...(notas ? { notas } : {}),
+        metodoPago: d.metodo_pago!,
+        ...(d.notas ? { notas: d.notas } : {}),
       });
       if (!r.ok) throw new AppError(MENSAJE_RAZON[r.reason] ?? "No se pudo registrar.", r.reason, 409);
       return `Listo: ${resumen}`;
@@ -582,7 +681,7 @@ export async function ejecutarAccion(nombre: NombreHerramienta, entrada: unknown
         producto_id: d.producto_id,
         cantidad: d.cantidad,
         precio_unitario: producto.price,
-        metodo_pago: d.metodo_pago,
+        metodo_pago: d.metodo_pago!,
         nota: d.nota ? `${d.nota} (Asistente IA)` : "Asistente IA",
         registrado_por: user.id,
       });
@@ -592,7 +691,7 @@ export async function ejecutarAccion(nombre: NombreHerramienta, entrada: unknown
     case "crear_cita": {
       const d = esquemas.crear_cita.parse(e);
       const servicio = (await getServiceById(d.servicio_id))!;
-      const cliente = await findOrCreateByPhone(d.telefono_cliente!.replace(/\D/g, ""), d.nombre_cliente);
+      const cliente = await clienteConNombre(d.telefono_cliente!, d.nombre_cliente);
       const inicioUtc = timeStringToUtcDate(d.fecha, d.hora, BUSINESS_TIMEZONE);
       const r = await crearCita({
         clienteId: cliente.id,

@@ -1,12 +1,26 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 vi.mock("../src/config/env.js", () => ({ env: { LOG_LEVEL: "silent", ANTHROPIC_API_KEY: "test" } }));
-let clientesFake: { nombre: string; telefono: string }[] = [];
+let clientesFake: { nombre: string | null; telefono: string }[] = [];
+const updateMock = vi.fn();
+let filtroTelefono: string | null = null;
 const cadenaClientes = {
   select: () => cadenaClientes,
   ilike: () => cadenaClientes,
   neq: () => cadenaClientes,
-  limit: async () => ({ data: clientesFake, error: null }),
+  eq: (col: string, valor: string) => {
+    if (col === "telefono") filtroTelefono = valor;
+    return cadenaClientes;
+  },
+  limit: async () => {
+    const data = filtroTelefono ? clientesFake.filter((c) => c.telefono === filtroTelefono) : clientesFake;
+    filtroTelefono = null;
+    return { data, error: null };
+  },
+  update: (v: unknown) => {
+    updateMock(v);
+    return { eq: async () => ({ error: null }) };
+  },
 };
 vi.mock("../src/db/client.js", () => ({ supabase: { from: () => cadenaClientes } }));
 
@@ -36,7 +50,7 @@ vi.mock("../src/db/repositories/citas.js", () => ({
   getCitaPorId: async () => ({ id: "c1", barbero: "Cieza", servicio_id: "corte-basico", inicio_utc: "2026-11-20T20:00:00Z" }),
   reagendarCitaDesdePanel: vi.fn(),
 }));
-const findOrCreateMock = vi.fn(async () => ({ id: "cli1" }));
+const findOrCreateMock = vi.fn(async () => ({ id: "cli1", nombre: null as string | null }));
 vi.mock("../src/db/repositories/clientes.js", () => ({ findOrCreateByPhone: (...a: unknown[]) => findOrCreateMock(...a) }));
 vi.mock("../src/lib/disponibilidadService.js", () => ({ consultarDisponibilidadReal: vi.fn() }));
 
@@ -51,6 +65,7 @@ beforeEach(() => {
   crearMensaje.mockReset();
   registrarMock.mockClear();
   findOrCreateMock.mockClear();
+  updateMock.mockClear();
   clientesFake = [];
 });
 
@@ -58,7 +73,15 @@ describe("acciones del asistente", () => {
   it("el resumen usa nombres y precios del catálogo, no los del modelo", async () => {
     const a = await prepararAccion(
       "registrar_servicio_atendido",
-      { servicio_ids: ["corte-basico", "barba"], barbero: "Nilton", metodo_pago: "yape_plin", hora: "15:00", fecha: "2026-11-20" },
+      {
+        servicio_ids: ["corte-basico", "barba"],
+        barbero: "Nilton",
+        metodo_pago: "yape_plin",
+        hora: "15:00",
+        fecha: "2026-11-20",
+        nombre_cliente: "Ana Torres",
+        telefono_cliente: "987 654 321",
+      },
       dueno,
     );
     expect(a.resumen).toContain("Corte básico + Barba (S/ 65)");
@@ -70,14 +93,18 @@ describe("acciones del asistente", () => {
     await expect(
       prepararAccion("registrar_servicio_atendido", { servicio_ids: ["barba"], barbero: "Cieza", metodo_pago: "efectivo" }, nilton),
     ).rejects.toThrow("Solo puedes registrar lo tuyo");
-    const a = await prepararAccion("registrar_servicio_atendido", { servicio_ids: ["barba"], metodo_pago: "efectivo" }, nilton);
+    const a = await prepararAccion(
+      "registrar_servicio_atendido",
+      { servicio_ids: ["barba"], metodo_pago: "efectivo", cliente_mostrador: true },
+      nilton,
+    );
     expect(a.entrada.barbero).toBe("Nilton");
   });
 
-  it("recepción tiene que decir qué barbero atendió", async () => {
-    await expect(
-      prepararAccion("registrar_servicio_atendido", { servicio_ids: ["barba"], metodo_pago: "efectivo" }, recepcion),
-    ).rejects.toThrow("Falta decir qué barbero");
+  it("dice TODO lo que falta en una sola respuesta", async () => {
+    await expect(prepararAccion("registrar_servicio_atendido", { servicio_ids: ["barba"] }, recepcion)).rejects.toThrow(
+      "Para registrar el servicio falta: qué barbero lo atendió, con qué pagó (Yape/Plin, tarjeta o efectivo), el nombre y apellido del cliente y su número de celular.",
+    );
   });
 
   it("no deja vender más que el stock", async () => {
@@ -95,7 +122,7 @@ describe("acciones del asistente", () => {
   it("al confirmar, se ejecuta con los datos validados", async () => {
     const texto = await ejecutarAccion(
       "registrar_servicio_atendido",
-      { servicio_ids: ["barba"], barbero: "Cieza", metodo_pago: "efectivo", fecha: "2026-11-20", hora: "16:00" },
+      { servicio_ids: ["barba"], barbero: "Cieza", metodo_pago: "efectivo", fecha: "2026-11-20", hora: "16:00", cliente_mostrador: true },
       dueno,
     );
     expect(texto).toMatch(/^Listo:/);
@@ -122,7 +149,7 @@ describe("correrAsistente", () => {
             type: "tool_use",
             id: "t2",
             name: "registrar_servicio_atendido",
-            input: { servicio_ids: ["corte-basico"], barbero: "Brayan", metodo_pago: "efectivo" },
+            input: { servicio_ids: ["corte-basico"], barbero: "Brayan", metodo_pago: "efectivo", nombre_cliente: "Luis Ríos", telefono_cliente: "912345678" },
           },
         ],
       });
@@ -131,6 +158,7 @@ describe("correrAsistente", () => {
     if (r.tipo !== "confirmar") return;
     expect(r.accion.nombre).toBe("registrar_servicio_atendido");
     expect(r.accion.resumen).toContain("Corte básico (S/ 40)");
+    expect(r.accion.resumen).toContain("cliente nuevo: Luis Ríos (912 345 678)");
     expect(registrarMock).not.toHaveBeenCalled();
     // La segunda llamada recibió el resultado real de ver_servicios (el arreglo se comparte: se busca el tool_result).
     const segunda = crearMensaje.mock.calls[1]![0] as { messages: { role: string; content: unknown }[] };
@@ -152,59 +180,90 @@ describe("correrAsistente", () => {
   });
 });
 
-describe("cliente por su nombre", () => {
+describe("registro completo del cliente", () => {
   const base = { servicio_ids: ["barba"], barbero: "Cieza", metodo_pago: "efectivo", fecha: "2026-11-20", hora: "16:00" };
 
-  it("una sola ficha con ese nombre: se usa su teléfono", async () => {
+  it("ya registrado (por nombre): lo dice en la confirmación y usa su ficha", async () => {
     clientesFake = [{ nombre: "Juan Pérez", telefono: "51987654321" }];
     const a = await prepararAccion("registrar_servicio_atendido", { ...base, nombre_cliente: "juan perez" }, dueno);
-    expect(a.resumen).toContain("Juan Pérez (…321)");
-    expect(a.entrada.telefono_cliente).toBe("51987654321");
+    expect(a.resumen).toContain("cliente ya registrado: Juan Pérez (987 654 321)");
     await ejecutarAccion("registrar_servicio_atendido", { ...base, nombre_cliente: "juan perez" }, dueno);
     expect(findOrCreateMock).toHaveBeenCalledWith("51987654321", "Juan Pérez");
   });
 
-  it("varias fichas: pregunta cuál, sin registrar", async () => {
+  it("ya registrado (por número): lo encuentra aunque no digan el nombre", async () => {
+    clientesFake = [{ nombre: "Juan Pérez", telefono: "51987654321" }];
+    const a = await prepararAccion("registrar_servicio_atendido", { ...base, telefono_cliente: "987654321" }, dueno);
+    expect(a.resumen).toContain("cliente ya registrado: Juan Pérez");
+  });
+
+  it("varios con ese nombre: pregunta cuál, sin registrar", async () => {
     clientesFake = [
       { nombre: "Juan Pérez", telefono: "51987654321" },
       { nombre: "Juan Ramos", telefono: "51911111999" },
     ];
     await expect(prepararAccion("registrar_servicio_atendido", { ...base, nombre_cliente: "Juan" }, dueno)).rejects.toThrow(
-      /varios clientes.*Juan Pérez \(…321\).*Juan Ramos \(…999\)/,
+      /varios clientes.*Juan Pérez \(termina en 321\).*Juan Ramos \(termina en 999\)/,
     );
   });
 
-  it("si hay varias pero una con el nombre exacto, se usa esa", async () => {
-    clientesFake = [
-      { nombre: "Juan Pérez", telefono: "51987654321" },
-      { nombre: "Juan Pérez Soto", telefono: "51911111999" },
-    ];
-    const a = await prepararAccion("registrar_servicio_atendido", { ...base, nombre_cliente: "Juan Pérez" }, dueno);
-    expect(a.entrada.telefono_cliente).toBe("51987654321");
+  it("nuevo solo con nombre: pide apellido y número", async () => {
+    await expect(prepararAccion("registrar_servicio_atendido", { ...base, nombre_cliente: "Pedro" }, dueno)).rejects.toThrow(
+      "falta: el apellido del cliente y su número de celular (es cliente nuevo)",
+    );
   });
 
-  it("sin ficha: va a mostrador y el nombre queda en la nota del servicio", async () => {
-    const a = await prepararAccion("registrar_servicio_atendido", { ...base, nombre_cliente: "Pedro" }, dueno);
-    expect(a.resumen).toContain("Pedro (sin ficha: va como cliente de mostrador)");
-    await ejecutarAccion("registrar_servicio_atendido", { ...base, nombre_cliente: "Pedro" }, dueno);
-    expect(findOrCreateMock).toHaveBeenCalledWith("mostrador", "Cliente de mostrador");
-    expect(registrarMock).toHaveBeenCalledWith(expect.objectContaining({ notas: "Cliente: Pedro" }));
+  it("nuevo con nombre completo pero sin número: pide el número", async () => {
+    await expect(prepararAccion("registrar_servicio_atendido", { ...base, nombre_cliente: "Pedro Gómez" }, dueno)).rejects.toThrow(
+      "falta: su número de celular (es cliente nuevo)",
+    );
   });
 
-  it("agendar a alguien sin ficha y sin teléfono: pide el teléfono", async () => {
+  it("nuevo con número pero sin apellido: pide el apellido", async () => {
     await expect(
-      prepararAccion("crear_cita", { servicio_id: "barba", fecha: "2026-11-25", hora: "15:00", nombre_cliente: "Pedro" }, dueno),
-    ).rejects.toThrow("necesito su teléfono");
+      prepararAccion("registrar_servicio_atendido", { ...base, nombre_cliente: "Pedro", telefono_cliente: "923456789" }, dueno),
+    ).rejects.toThrow("falta: el apellido del cliente");
   });
 
-  it("agendar a un cliente conocido solo con su nombre", async () => {
-    clientesFake = [{ nombre: "Juan Pérez", telefono: "51987654321" }];
+  it("número incompleto: lo dice", async () => {
+    await expect(
+      prepararAccion("registrar_servicio_atendido", { ...base, nombre_cliente: "Pedro Gómez", telefono_cliente: "92345" }, dueno),
+    ).rejects.toThrow("número de celular completo");
+  });
+
+  it("nuevo y completo: crea su ficha con nombre y número", async () => {
     const a = await prepararAccion(
-      "crear_cita",
-      { servicio_id: "barba", fecha: "2026-11-25", hora: "15:00", nombre_cliente: "Juan Pérez" },
+      "registrar_servicio_atendido",
+      { ...base, nombre_cliente: "Pedro Gómez", telefono_cliente: "+51 923 456 789" },
       dueno,
     );
-    expect(a.resumen).toContain("para Juan Pérez (…321)");
-    expect(a.entrada.telefono_cliente).toBe("51987654321");
+    expect(a.resumen).toContain("cliente nuevo: Pedro Gómez (923 456 789)");
+    await ejecutarAccion("registrar_servicio_atendido", { ...base, nombre_cliente: "Pedro Gómez", telefono_cliente: "923456789" }, dueno);
+    expect(findOrCreateMock).toHaveBeenCalledWith("51923456789", "Pedro Gómez");
+  });
+
+  it("el número ya es de otra persona: pregunta antes de registrar", async () => {
+    clientesFake = [{ nombre: "María Luna", telefono: "51923456789" }];
+    await expect(
+      prepararAccion("registrar_servicio_atendido", { ...base, nombre_cliente: "Pedro Gómez", telefono_cliente: "923456789" }, dueno),
+    ).rejects.toThrow("ya está registrado a nombre de María Luna");
+  });
+
+  it("su ficha existía sin nombre: se completa al registrar", async () => {
+    clientesFake = [{ nombre: null, telefono: "51923456789" }];
+    await ejecutarAccion("registrar_servicio_atendido", { ...base, nombre_cliente: "Pedro Gómez", telefono_cliente: "923456789" }, dueno);
+    expect(updateMock).toHaveBeenCalledWith({ nombre: "Pedro Gómez" });
+  });
+
+  it("agendar sin datos del cliente: pide nombre, apellido y número", async () => {
+    await expect(prepararAccion("crear_cita", { servicio_id: "barba", fecha: "2026-11-25", hora: "15:00" }, dueno)).rejects.toThrow(
+      "Para agendar la cita falta: el nombre y apellido del cliente y su número de celular",
+    );
+  });
+
+  it("venta sin medio de pago: lo pide", async () => {
+    await expect(prepararAccion("registrar_venta_producto", { producto_id: "p1", cantidad: 1 }, dueno)).rejects.toThrow(
+      "Para registrar la venta falta: con qué pagó",
+    );
   });
 });
