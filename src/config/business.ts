@@ -2,9 +2,9 @@ import { env } from "./env.js";
 
 // No hay panel admin para editar estos valores todavía, así que viven como
 // constantes en vez de una tabla de configuración sin UI. Confirmado con
-// el negocio: 15 min de buffer entre citas, 2h de anticipación mínima.
+// el negocio: 15 min de buffer entre citas, 1h de anticipación mínima (era 2h hasta el 2026-11-20).
 export const BUFFER_MINUTES = 15;
-export const MIN_LEAD_MINUTES = 120;
+export const MIN_LEAD_MINUTES = 60;
 // Los turnos se ofrecen en hora en punto: el corte básico dura 45 min y con
 // el buffer ocupa la hora completa, así que empezar a las :30 solo desalinea
 // la agenda del día sin ganar un cupo real.
