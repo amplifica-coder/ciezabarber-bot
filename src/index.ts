@@ -11,6 +11,7 @@ import { publicRoutes } from "./routes/public.js";
 import { calendarWebhookRoutes } from "./routes/calendarWebhook.js";
 import { simuladorRoutes } from "./routes/simulador.js";
 import { whatsappQrRoutes } from "./routes/whatsappQr.js";
+import { asistenteRoutes } from "./routes/asistente.js";
 import { arrancarSesionQrSiHayGuardada } from "./whatsapp-qr/sesion.js";
 import { borrarSimulacionesVencidas } from "./db/repositories/simulaciones.js";
 import { syncPendingCitas } from "./calendar/retrySync.js";
@@ -87,6 +88,7 @@ await app.register(clienteRoutes);
 await app.register(calendarWebhookRoutes);
 await app.register(simuladorRoutes);
 await app.register(whatsappQrRoutes);
+await app.register(asistenteRoutes);
 
 try {
   await app.listen({ port: env.PORT, host: "0.0.0.0" });
